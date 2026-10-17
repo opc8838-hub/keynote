@@ -38,6 +38,8 @@ img{display:block;max-width:100%}
 .mark sup{font-size:10px;font-weight:500;margin-left:1px}
 .bar nav{display:flex;gap:28px;font-size:14px}
 .bar nav a{text-decoration:none;color:var(--ink-2)}
+.bar nav a.pill{background:var(--ink);color:var(--lime);padding:2px 10px;border-radius:2px;font-family:var(--display);font-weight:800;letter-spacing:.01em}
+.bar nav a.pill:hover{background:#000;color:var(--lime);text-decoration:none}
 .bar nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:4px}
 @media (max-width:720px){.bar nav{gap:16px;font-size:13px}.bar nav a:nth-child(n+4){display:none}}
 
@@ -175,13 +177,28 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
 @media (max-width:1000px){.iter{grid-template-columns:1fr 1fr}.iter div{border-right:0;border-bottom:1px solid var(--rule-soft);margin:0;padding:16px 16px 16px 0}}
 @media (max-width:640px){.iter{grid-template-columns:1fr}}
 
+/* skill */
+.skill{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:start}
+.skill ol{list-style:none;counter-reset:k;border-top:1px solid var(--ink)}
+.skill ol li{counter-increment:k;display:grid;grid-template-columns:44px 1fr;gap:8px;padding:16px 0;border-bottom:1px solid var(--rule-soft);font-size:16px}
+.skill ol li::before{content:counter(k,decimal-leading-zero);font-family:var(--display);font-weight:800;font-size:14px;padding-top:2px}
+.skill code{display:inline-block;margin-top:4px;font-family:Consolas,"SFMono-Regular",monospace;font-size:13px;background:var(--paper);padding:1px 6px;border-radius:2px;white-space:nowrap;max-width:100%;overflow-x:auto}
+.skill .go{display:inline-block;margin-top:22px;background:var(--ink);color:var(--lime);text-decoration:none;font-weight:700;font-size:15px;padding:12px 20px;border-radius:2px}
+.skill .go:hover{background:#000}
+.skill .go:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.tree{background:var(--paper);padding:22px 24px;font-size:15px;line-height:1.9;box-shadow:0 1px 2px rgba(30,42,33,.12)}
+.tree div{display:grid;grid-template-columns:150px 1fr;gap:12px;border-bottom:1px solid var(--rule-soft);padding:4px 0}
+.tree div:last-child{border-bottom:0}
+.tree b{font-family:var(--display);font-weight:800;font-size:14px}
+@media (max-width:860px){.skill{grid-template-columns:1fr;gap:32px}.tree div{grid-template-columns:1fr;gap:0}}
+
 /* 结尾 */
 .close{background:var(--ink);color:var(--lime)}
 .close .wrap{padding-top:96px;padding-bottom:72px}
 .close p.big{font-weight:900;font-size:clamp(34px,5.6vw,80px);line-height:1.15;letter-spacing:-.03em;max-width:1100px}
 .close footer{margin-top:80px;padding-top:20px;border-top:1px solid rgba(227,231,126,.3);display:flex;justify-content:space-between;gap:16px;font-size:13px;color:#B9BD6A;flex-wrap:wrap}
 /* 逐字出现 */
-.tw :is(h1,h2,h3,p,blockquote,dt,dd,li,.meta>div,.who,.role,.tone,.num,.axis span,footer span,.tag):not(.tw-done):not(.ch){opacity:0}
+.tw :is(h1,h2,h3,p,blockquote,dt,dd,li,.meta>div,.who,.role,.tone,.num,.axis span,footer span,.tag,.tree b,.tree span,.go):not(.tw-done):not(.ch){opacity:0}
 .ch{opacity:0;filter:blur(6px);transition:opacity .55s ease,filter .55s ease;transition-delay:var(--d)}
 .in .ch{opacity:1;filter:blur(0)}
 .sch{fill-opacity:0;transition:fill-opacity .45s ease;transition-delay:var(--d)}
@@ -197,7 +214,7 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
   <div class="wrap">
     <a class="mark" href="#top">keynote<sup>®</sup></a>
     <nav aria-label="页面导航">
-      <a href="#story">故事</a><a href="#acts">五幕</a><a href="#flow">工作流</a><a href="#assets">素材</a><a href="#iterate">迭代</a>
+      <a class="pill" href="#skill">Skill</a><a href="#story">故事</a><a href="#acts">五幕</a><a href="#flow">工作流</a><a href="#assets">素材</a><a href="#iterate">迭代</a>
     </nav>
   </div>
 </header>
@@ -381,6 +398,32 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
   </div>
 </div>
 </section>
+<section id="skill">
+<div class="wrap sec">
+  <div class="sec-head">
+    <div class="n">07 Skill</div>
+    <div><h2>沉淀成一个 skill</h2><p>这次跑通的流程，整理成了「keynote 发布会 skill」。换一家企业、换一个产品，Claude 会按同样的五幕和三个拍板节点做下去，审美仍然由你来定。</p></div>
+  </div>
+  <div class="skill">
+    <div>
+      <ol>
+        <li><span>打开 GitHub 上的 <b>skill/keynote-launch-film</b> 文件夹，整个下载下来</span></li>
+        <li><span>放进 Claude Code 的 skills 目录：<br><code>~/.claude/skills/keynote-launch-film</code></span></li>
+        <li><span>在 Claude Code 里说「做一个发布会片」，它会先读这个 skill，再按流程推进</span></li>
+      </ol>
+      <a class="go" href="https://github.com/opc8838-hub/keynote/tree/main/skill/keynote-launch-film" target="_blank" rel="noopener">在 GitHub 查看 skill →</a>
+    </div>
+    <div class="tree" aria-label="skill 里有什么">
+      <div><b>五幕骨架</b><span>开场、揭幕、两个中段模块、回到舞台</span></div>
+      <div><b>中段模块库</b><span>技术、供应链、品质 / 人文、用户、匠人，一硬一软</span></div>
+      <div><b>三个拍板节点</b><span>文案定稿、关键镜头样片、整片看片</span></div>
+      <div><b>录音要求</b><span>配音质量取决于录音，开工第一天就发出去</span></div>
+      <div><b>交片前自查</b><span>发白、抠像、字幕、禁用素材，先自己挑掉</span></div>
+      <div><b>现成脚本</b><span>配音、换白底、上传包、代码动效、总合成</span></div>
+    </div>
+  </div>
+</div>
+</section>
 </main>
 
 <section class="close">
@@ -515,7 +558,7 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
 (function(){
   var root = document.documentElement;
   if (!root.classList.contains('tw')) return;
-  var SEL = 'h1,h2,h3,p,blockquote,dt,dd,li,.meta>div,.who,.role,.tone,.num,.axis span,footer span,.tag';
+  var SEL = 'h1,h2,h3,p,blockquote,dt,dd,li,.meta>div,.who,.role,.tone,.num,.axis span,footer span,.tag,.tree b,.tree span,.go';
   var all = [].slice.call(document.querySelectorAll(SEL));
   var skip = function(el){ return el.closest('.ctl,.frame,.bars,svg'); };
   var targets = all.filter(function(el){

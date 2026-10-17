@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>文字地球</title>
+<style>
+  body { margin:0; background:#1d1d1f; color:#ddd; font:13px system-ui, sans-serif; }
+  .wrap { max-width:1280px; margin:0 auto; padding:16px; }
+  canvas { display:block; width:100%; aspect-ratio:16/9; background:#fff; }
+  .bar { display:flex; gap:12px; align-items:center; margin-top:10px; }
+  #scrub { flex:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="cv" width="1920" height="1080"></canvas>
+  <div class="bar"><button id="play">暂停</button><span id="time"></span><input id="scrub" type="range" min="0" step="0.001" value="0"></div>
+</div>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="vendor/land.js"></script>
+<script>
+// ───────── 参数 ─────────
+const W = 1920, H = 1080;
+const BG = "#f7f7f5";
+const G = { cx: 960, cy: 560, R: 410 };
+const LEAD = 0.6;                 // 画面先于第 10 句配音多少秒开始
+const DUR = 8.4;                  // 总长
+const ROT0 = 150, ROT1 = 40;      // 地球正中经度：从 150°E 慢慢转到 40°E
+// 卡片：城市、坐标、UTC 偏移、卡片位置（左上角）、出现时间（相对第 10 句配音开头，按语音能量切分估的）
+const CITIES = [
+  { zh: "东莞", en: "Dongguan",     lat: 23.02, lon: 113.75, utc: 8,  x: 1440, y: 505, at: 1.30, home: true },
+  { zh: "洛杉矶", en: "Los Angeles", lat: 34.05, lon: -118.24, utc: -7, x: 150,  y: 700, at: 2.30 },
+  { zh: "柏林", en: "Berlin",       lat: 52.52, lon: 13.40,  utc: 2,  x: 400,  y: 40,  at: 2.90 },
+  { zh: "伦敦", en: "London",       lat: 51.51, lon: -0.13,  utc: 1,  x: 150,  y: 235, at: 3.45 },
+  { zh: "吉隆坡", en: "Kuala Lumpur", lat: 3.14, lon: 101.69, utc: 8,  x: 1420, y: 775, at: 4.00 },
+  { zh: "利雅得", en: "Riyadh",      lat: 24.71, lon: 46.68,  utc: 3,  x: 1400, y: 225, at: 4.80 },
+  { zh: "布鲁塞尔", en: "Brussels",  lat: 50.85, lon: 4.35,   utc: 2,  x: 110,  y: 465, at: 6.00 },
+];
+const CARD_W = 330, CARD_H = 110;     // v2：卡片和字整体放大约 1.3 倍
+const BASE_UTC_SEC = (12 * 3600 + 30 * 60);   // 东莞 20:30 → UTC 12:30
+const WORDS = ["care", "home", "rise", "turn", "stand", "rest", "family", "morning", "gentle", "steady",
+  "independence", "comfort", "sleep", "together", "lianying", "dignity", "life", "safe", "daily", "easy"];
+
+// ───────── 工具 ─────────
+function bezier(x1, y1, x2, y2) {
+  const cx = 3*x1, bx = 3*(x2 - x1) - cx, ax = 1 - cx - bx, cy = 3*y1, by = 3*(y2 - y1) - cy, ay = 1 - cy - by;
+  const X = t => ((ax*t + bx)*t + cx)*t, Y = t => ((ay*t + by)*t + cy)*t;
+  return x => { let lo = 0, hi = 1, t = x; for (let i = 0; i < 24; i++) { t = (lo + hi) / 2; if (X(t) < x) lo = t; else hi = t; } return Y(t); };
+}
+const E = { soft: bezier(0.4, 0, 0.2, 1), calm: bezier(0.35, 0, 0.65, 1), out: bezier(0.2, 0, 0, 1) };
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (f, t, a, b) => { const u = clamp((t - a) / (b - a)); return u <= 0 ? 0 : u >= 1 ? 1 : f(u); };
+const D2R = Math.PI / 180;
+const FONT_CN = '"DengXian","等线","Microsoft YaHei",sans-serif';
+const FONT_EN = '"Segoe UI","Segoe UI Light",sans-serif';
+
+// ───────── 陆地遮罩（等距圆柱投影栅格） ─────────
+const MW = 1440, MH = 720;
+const mask = document.createElement("canvas"); mask.width = MW; mask.height = MH;
+let MASK = null;
+function buildMask() {
+  const m = mask.getContext("2d");
+  m.fillStyle = "#000"; m.fillRect(0, 0, MW, MH);
+  m.fillStyle = "#fff";
+  const land = topojson.feature(LAND, LAND.objects.land);
+  const polys = [];
+  for (const f of land.features) {
+    const g = f.geometry;
+    if (g.type === "Polygon") polys.push(g.coordinates); else if (g.type === "MultiPolygon") polys.push(...g.coordinates);
+  }
+  const px = lon => (lon + 180) / 360 * MW, py = lat => (90 - lat) / 180 * MH;
+  for (const poly of polys) {
+    m.beginPath();
+    let skip = false;
+    const rings = poly.map(ring => {
+      // 经度展开成连续的
+      const out = []; let prev = null, off = 0;
+      for (const [lo, la] of ring) { if (prev !== null) { const d = lo - prev; if (d > 180) off -= 360; else if (d < -180) off += 360; } prev = lo; out.push([lo + off, la]); }
+      const span = Math.max(...out.map(p => p[0])) - Math.min(...out.map(p => p[0]));
+      if (span > 350) skip = true;        // 南极洲那种绕一圈的，下面单独处理
+      return out;
+    });
+    if (skip) continue;
+    for (const shift of [-360, 0, 360]) {
+      m.beginPath();
+      for (const ring of rings) { ring.forEach(([lo, la], i) => i ? m.lineTo(px(lo + shift), py(la)) : m.moveTo(px(lo + shift), py(la))); m.closePath(); }
+      m.fill("evenodd");
+    }
+  }
+  m.fillRect(0, py(-66), MW, MH);   // 南极洲
+  MASK = m.getImageData(0, 0, MW, MH).data;
+}
+function isLand(lat, lon) {
+  lon = ((lon + 180) % 360 + 360) % 360 - 180;
+  const x = Math.min(MW - 1, Math.floor((lon + 180) / 360 * MW)), y = Math.min(MH - 1, Math.floor((90 - lat) / 180 * MH));
+  return MASK[(y * MW + x) * 4] > 127;
+}
+
+// ───────── 文字网格：屏幕上等距的行，每行沿经度排满单词 ─────────
+const ROW_H = 14.5;
+const FS = 12.5;
+let GRID = [];
+function buildGrid() {
+  const ctx = cv.getContext("2d");
+  let wi = 0;
+  const nRows = Math.floor(2 * G.R / ROW_H);
+  for (let k = 0; k < nRows; k++) {
+    const s = -1 + (k + 0.5) * 2 / nRows;          // 屏幕 y 的比例（-1 顶 … 1 底）
+    const lat = -Math.asin(s) / D2R;               // 上北下南
+    const rr = G.R * Math.cos(lat * D2R);
+    if (rr < 30) continue;
+    const words = [];
+    let lon = (k * 37) % 360 - 180;
+    const startLon = lon;
+    while (lon < startLon + 360) {
+      const w = WORDS[(wi * 7 + k * 3) % WORDS.length]; wi++;
+      ctx.font = `500 ${FS}px ${FONT_EN}`;
+      const ww = ctx.measureText(w).width, pw = ww + 9;
+      const dl = pw / rr / D2R;                    // 这个词占多少经度
+      if (lon + dl > startLon + 360) break;
+      const mid = lon + dl / 2;
+      // 逐字母判断陆地/海洋，海岸线更清楚
+      const chars = []; let acc = -ww / 2;
+      for (const ch of w) { const cw = ctx.measureText(ch).width; const off = acc + cw / 2; chars.push({ ch, off, land: isLand(lat, mid + off / rr / D2R) }); acc += cw; }
+      words.push({ w, lon: mid, dl, chars });
+      lon += dl;
+    }
+    GRID.push({ lat, y: G.cy + s * G.R, rr, words });
+  }
+}
+
+// ───────── 一帧 ─────────
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+function rotAt(t) { return ROT0 + (ROT1 - ROT0) * E.calm(clamp(t / DUR)); }
+function project(lat, lon, rot) {
+  const rel = (lon - rot) * D2R, c = Math.cos(lat * D2R);
+  return { x: G.cx + G.R * c * Math.sin(rel), y: G.cy - G.R * Math.sin(lat * D2R), z: c * Math.cos(rel) };
+}
+function fmt(sec) { sec = ((Math.floor(sec) % 86400) + 86400) % 86400; const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec % 60; return [h, m, s].map(v => String(v).padStart(2, "0")).join(":"); }
+
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+  const intro = seg(E.soft, t, 0, 0.9);           // 开头整体淡入
+  const rot = rotAt(t);
+  // 外圈细线
+  ctx.globalAlpha = 0.5 * intro; ctx.strokeStyle = "#c7c7cc"; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(G.cx, G.cy, G.R + 6, 0, Math.PI * 2); ctx.stroke();
+  // 单词
+  ctx.textBaseline = "middle"; ctx.textAlign = "center"; ctx.font = `500 ${FS}px ${FONT_EN}`;
+  for (const row of GRID) {
+    for (const wd of row.words) {
+      const rel = (wd.lon - rot) * D2R, cz = Math.cos(rel);
+      if (cz <= 0.02) continue;
+      const x = G.cx + row.rr * Math.sin(rel);
+      const limb = clamp((cz - 0.02) / 0.35);
+      ctx.setTransform(Math.max(0.05, cz), 0, 0, 1, x, row.y);
+      for (const c of wd.chars) {
+        if (c.land) { ctx.globalAlpha = 0.95 * (0.3 + 0.7 * limb) * intro; ctx.fillStyle = "#1d1d1f"; }
+        else { ctx.globalAlpha = 0.16 * limb * intro; ctx.fillStyle = "#8e8e93"; }
+        ctx.fillText(c.ch, c.off, 0);
+      }
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.textAlign = "left";
+  // 城市：点 + 连线 + 卡片
+  for (const c of CITIES) {
+    const ta = LEAD + c.at - 0.15;
+    const q = seg(E.out, t, ta, ta + 0.55);
+    const p = project(c.lat, c.lon, rot);
+    const vis = clamp((p.z - 0.05) / 0.25);
+    // 卡片中心朝向地球的那一边
+    const cxC = c.x + CARD_W / 2, cyC = c.y + CARD_H / 2;
+    const ex = c.x + (p.x > cxC ? CARD_W : 0), ey = cyC;
+    if (q > 0 && vis > 0) {
+      // 连线：从城市点往卡片画出来
+      const lq = seg(E.soft, t, ta + 0.1, ta + 0.6);
+      ctx.globalAlpha = 0.55 * vis * lq; ctx.strokeStyle = "#6e6e73"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + (ex - p.x) * lq, p.y + (ey - p.y) * lq); ctx.stroke();
+      // 点亮时一圈扩散
+      const rp = clamp((t - ta) / 1.2);
+      if (rp < 1) { ctx.globalAlpha = (1 - rp) * 0.6 * vis; ctx.lineWidth = 1.5; ctx.strokeStyle = "#1d1d1f"; ctx.beginPath(); ctx.arc(p.x, p.y, 6 + 34 * E.out(rp), 0, Math.PI * 2); ctx.stroke(); }
+      if (c.home) { const br = 0.5 + 0.5 * Math.sin((t - ta) * 3.2); ctx.globalAlpha = 0.18 * vis * q * br; ctx.fillStyle = "#1d1d1f"; ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.fill(); }
+      ctx.globalAlpha = vis * q; ctx.fillStyle = "#1d1d1f";
+      ctx.beginPath(); ctx.arc(p.x, p.y, c.home ? 6.5 : 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = BG; ctx.beginPath(); ctx.arc(p.x, p.y, c.home ? 2.4 : 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+    if (q <= 0) continue;
+    // 卡片
+    ctx.save();
+    ctx.globalAlpha = q;
+    ctx.translate(0, (1 - q) * 14);
+    const dark = !!c.home;
+    ctx.shadowColor = "rgba(0,0,0,0.08)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6;
+    ctx.fillStyle = dark ? "#1d1d1f" : "#ffffff";
+    roundRect(c.x, c.y, CARD_W, CARD_H, 15); ctx.fill();
+    ctx.shadowColor = "transparent";
+    if (!dark) { ctx.strokeStyle = "#d2d2d7"; ctx.lineWidth = 1; roundRect(c.x + 0.5, c.y + 0.5, CARD_W - 1, CARD_H - 1, 15); ctx.stroke(); }
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = dark ? "#ffffff" : "#1d1d1f";
+    ctx.font = `400 33px ${FONT_CN}`; ctx.fillText(c.zh, c.x + 26, c.y + 47);
+    const zw = ctx.measureText(c.zh).width;
+    ctx.fillStyle = dark ? "rgba(255,255,255,0.62)" : "#6e6e73";
+    ctx.font = `300 22px ${FONT_EN}`; ctx.fillText(c.en, c.x + 37 + zw, c.y + 46);
+    // 当地时间（秒在走）
+    ctx.fillStyle = dark ? "#ffffff" : "#1d1d1f";
+    ctx.font = `300 26px "Consolas","Segoe UI",monospace`;
+    ctx.fillText(fmt(BASE_UTC_SEC + c.utc * 3600 + t), c.x + 26, c.y + 87);
+    ctx.fillStyle = dark ? "rgba(255,255,255,0.55)" : "#8e8e93";
+    ctx.font = `400 17px ${FONT_EN}`;
+    ctx.fillText(`UTC${c.utc >= 0 ? "+" : "−"}${Math.abs(c.utc)}`, c.x + 162, c.y + 86);
+    ctx.restore();
+  }
+  // 右下角小字
+  ctx.globalAlpha = 0.8 * intro; ctx.fillStyle = "#8e8e93"; ctx.font = `400 14px ${FONT_EN}`; ctx.textAlign = "right";
+  ctx.fillText("L I A N Y I N G   ·   W O R L D W I D E", W - 80, H - 60);
+  ctx.textAlign = "left"; ctx.globalAlpha = 1;
+}
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+// ───────── 播放器 ─────────
+window.__ready = false;
+let T = 0, playing = true, last = null;
+const $ = id => document.getElementById(id);
+$("scrub").max = DUR;
+function show() { render(T); $("scrub").value = T; $("time").textContent = `${T.toFixed(2)} / ${DUR}s`; }
+function tick(now) { if (playing) { if (last != null) T += (now - last) / 1000; if (T > DUR) T = 0; show(); } last = now; requestAnimationFrame(tick); }
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "暂停" : "播放"; };
+$("scrub").oninput = () => { T = parseFloat($("scrub").value); playing = false; show(); };
+window.__render = tt => { T = tt; playing = false; show(); };
+document.fonts.load(`14px ${FONT_EN}`).then(() => document.fonts.load(`25px ${FONT_CN}`)).then(() => {
+  buildMask(); buildGrid(); show(); window.__ready = true; requestAnimationFrame(tick);
+});
+</script>
+</body>
+</html>

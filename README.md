@@ -37,3 +37,8 @@
 ## 本地预览
 
 直接用浏览器打开 `index.html`。
+
+
+## keynote 发布会 skill
+
+这套流程已沉淀成 Claude Code skill，在 [`skill/keynote-launch-film`](skill/keynote-launch-film)。把整个文件夹放进 `~/.claude/skills/`，在 Claude Code 里说「做一个发布会片」即可。规范与目录说明见 [skill/keynote-launch-film/README.md](skill/keynote-launch-film/README.md)。

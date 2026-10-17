@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>连盈专利墙</title>
+<style>
+  :root { --bg:#1d1d1f; --panel:#2a2a2d; --text:#e8e8ea; --dim:#9a9aa0; --accent:#d23b2f; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1280px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:16px; font-weight:600; margin:0 0 12px; }
+  h1 span { color:var(--dim); font-weight:400; margin-left:8px; }
+  canvas { display:block; width:100%; aspect-ratio:16/9; background:#fff; border-radius:6px; }
+  .bar { display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap; }
+  button, select { background:var(--panel); color:var(--text); border:1px solid #3a3a3e; border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  button:hover { border-color:#55555a; }
+  #time { font-variant-numeric:tabular-nums; color:var(--dim); min-width:96px; }
+  #scrub { flex:1; min-width:200px; accent-color:var(--accent); }
+  .shots { position:relative; height:26px; margin-top:8px; }
+  .shots div { position:absolute; top:0; height:100%; border-left:1px solid #44444a; padding-left:6px; font-size:12px; color:var(--dim); white-space:nowrap; overflow:hidden; cursor:pointer; }
+  .shots div:hover { color:var(--text); }
+  .tip { color:var(--dim); font-size:12px; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>专利墙 · 弧形三排 · 预览 Demo<span id="meta">16:9 · 白底</span></h1>
+  <canvas id="cv" width="1920" height="1080"></canvas>
+  <div class="bar">
+    <button id="play">暂停</button>
+    <button id="restart">从头播</button>
+    <span id="time"></span>
+    <input id="scrub" type="range" min="0" step="0.001" value="0">
+    <select id="speed">
+      <option value="0.25">0.25×</option>
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+    </select>
+    <label><input id="loop" type="checkbox" checked> 循环</label>
+  </div>
+  <div class="shots" id="shots"></div>
+  <div class="tip">空格 播放/暂停 · ← → 逐帧 · 点上面的分镜名跳到该段</div>
+</div>
+
+<script src="rows.js"></script>
+<script>
+// ───────── 基本参数 ─────────
+const W = 1920, H = 1080;
+const IMG_W = 1055, IMG_H = 1491;
+const CH = 1000, CW = CH * IMG_W / IMG_H;          // 世界单位里的一张证书
+const ZC = 1.93;     // 特写：标题+字段区都在画面里，左右露出一点相邻证书
+const CY_C = -60;    // 特写时镜头的纵向位置（偏上，看标题和字段）
+const ZK = 0.90;     // 卡片带：和特写只差约 2 倍（原片 1.85 倍）
+const ZW = 0.36;     // 专利墙
+const GAP = 85;      // 特写平移时证书之间的空隙
+
+// 卡片带顺序（下标 → 图）。0 是开场那张，跳过 1、2，3..6 是四张特写
+const CAROUSEL = { "-8":"p3", "-7":"p2", "-6":"p6", "-5":"p5", "-4":"p4", "-3":"p1", "-2":"p3", "-1":"p2",
+                   0:"p5", 1:"p4", 2:"p6", 3:"p1", 4:"p2", 5:"p3", 6:"p6",
+                   7:"p4", 8:"p5", 9:"p1", 10:"p2", 11:"p3", 12:"p4", 13:"p5", 14:"p1" };
+const FEATURED = [3, 4, 5, 6];
+
+// ───────── 缓动 ─────────
+// cubic-bezier，和 CSS 的同一套写法
+function bezier(x1, y1, x2, y2) {
+  const cx = 3*x1, bx = 3*(x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3*y1, by = 3*(y2 - y1) - cy, ay = 1 - cy - by;
+  const X = t => ((ax*t + bx)*t + cx)*t, Y = t => ((ay*t + by)*t + cy)*t;
+  return x => {
+    let lo = 0, hi = 1, t = x;
+    for (let i = 0; i < 24; i++) { t = (lo + hi) / 2; if (X(t) < x) lo = t; else hi = t; }
+    return Y(t);
+  };
+}
+const FONT = '"DengXian","等线","Microsoft YaHei",sans-serif';
+const FONT_EN = '"Segoe UI Light","Segoe UI",sans-serif';
+const E = {
+  lin: t => t,
+  out: bezier(0.3, 0, 0.2, 1),       // 开场缩小：先快后慢
+  slide: bezier(0.5, 0, 0.3, 1),     // 卡片带滑动：加速再减速
+  push: bezier(0.55, 0, 0.25, 1),    // 推近：先慢后快，轻轻落地
+  pan: bezier(0.65, 0, 0.35, 1),     // 特写之间平移：两头都很柔
+  wall: bezier(0.45, 0, 0.2, 1),     // 拉远成墙
+  calm: bezier(0.3, 0, 0.7, 1),      // 结尾极慢的拉远
+  soft: bezier(0.4, 0, 0.2, 1),
+  pop: bezier(0.22, 1.35, 0.4, 1),     // 文字入场轻微回弹
+  land: bezier(0.2, 0.7, 0.2, 1),
+  wallZoom: bezier(0.6, 0, 0.2, 1), // 拉远：先只有主卡慢慢缩，再加速    // 各列滑进来：进得快、落得柔
+};
+const clamp = (v, a=0, b=1) => Math.max(a, Math.min(b, v));
+const seg = (f, t, a, b) => f(Math.max(0, Math.min(1, (t - a) / (b - a))));
+const lerp = (a, b, m) => a + (b - a) * m;
+
+// 关键帧轨道：[[时间, 值, 进入该帧的缓动], ...]
+function track(keys, t, log=false) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) {
+    const [t1, v1, ease] = keys[i];
+    if (t <= t1) {
+      const [t0, v0] = keys[i-1];
+      const p = (E[ease] || E.lin)(clamp((t - t0) / (t1 - t0)));
+      return log ? Math.exp(Math.log(v0) + (Math.log(v1) - Math.log(v0)) * p) : v0 + (v1 - v0) * p;
+    }
+  }
+  return keys[keys.length-1][1];
+}
+
+// ───────── 逐字节奏 ─────────
+const rowStart = j => j * 0.05;
+const rowDur = r => 0.12 + 0.40 * (r.x1 - r.x0) / 860;
+const scanLen = name => Math.max(...window.PATENT_ROWS[name].rows.map((r, j) => rowStart(j) + rowDur(r)));
+
+// ───────── 时间轴 ─────────
+// Logo 翻转成专利 → 左右专利慢慢展开 → 滑过两张推近特写 1 → 平移切 2–4 → 拉远，专利一张张上下进场成墙
+const T = {
+  logo: 0.8,        // Logo 先停一会儿
+  spread: 1.6,      // 左右专利同时从主卡后面展开（翻转途中就开始）
+  slideGap: 0.15,   // 展开完到开始滑动的间隔
+  slide3: 1.3,      // 第一次滑：跳过两张（滑 3 格）
+  pushLead: 0.2,    // 滑动结束前多久开始推近
+  push: 1.0,        // 推近
+  scanLead: 0.55,   // 推近开始后多久开始逐字（一边放大一边动）
+  pan: 0.85,        // 特写之间平移
+  panScanLead: 0.6, // 平移开始后多久开始逐字
+  rest: 0.35,       // 字出完后再停多久
+  wall: 2.0,        // 拉远成墙
+  wallHold: 2.8,    // 铺满后：整圈沿弧线慢慢转 + 镜头极慢退 + 文字打出
+  cards: 0.55,      // 拉远开始后多久，周围的专利开始一张张进场
+  cardStep: 0.13,   // 离主卡每远一张卡宽，晚多少进场
+  cardDur: 0.95,    // 每张滑进来用多久
+};
+// 翻转参数照搬 CellMotion「卡片登录」(card-login motion-spec)：先停 0.1s，1.5s 边转 180° 边放大，0.2s 回弹落定；Logo 放正，不倾斜
+const FLIP = { hold: 0.1, turn: 1.5, settle: 0.2, perspective: 1500 / 440,
+               scale0: 0.65, rotY0: 0, rotZ0: 0, dy0: 0, overshoot: 0.01 };
+E.flipTurn = bezier(0.25, 0.1, 0.25, 1);
+E.flipSettle = bezier(0.22, 1, 0.36, 1);
+E.spread = bezier(0.25, 0.75, 0.25, 1);   // 展开：起步就有速度，收尾很柔
+
+const FLIP_T = T.logo, FLIP_END = FLIP_T + FLIP.hold + FLIP.turn + FLIP.settle;
+// 展开从翻转转过 SPREAD_DEG（专利面刚露出来）那一刻开始
+const SPREAD_DEG = 100;
+const SPREAD_T = (() => {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (180 * E.flipTurn(mid) < SPREAD_DEG) lo = mid; else hi = mid; }
+  return FLIP_T + FLIP.hold + lo * FLIP.turn;
+})();
+const SPREAD_END = SPREAD_T + T.spread;
+const zoomK = [[0, ZK]];
+const cyK   = [[0, 0]];
+const sK    = [[0, 0]];
+const scanStart = [], SHOTS = [["Logo 翻转", 0, FLIP_END]];
+let cur = FLIP_END;
+{
+  // 第 1 张：展开 → 滑过两张 → 推近
+  const slideStart = SPREAD_END + T.slideGap, slideEnd = slideStart + T.slide3;
+  sK.push([slideStart, 0, "lin"], [slideEnd, FEATURED[0], "slide"]);
+  const pushStart = slideEnd - T.pushLead, pushEnd = pushStart + T.push;
+  zoomK.push([pushStart, ZK, "lin"], [pushEnd, ZC, "push"]);
+  cyK.push([pushStart, 0, "lin"], [pushEnd, CY_C, "push"]);
+  scanStart.push(pushStart + T.scanLead);
+  const end = Math.max(pushEnd, scanStart[0] + scanLen(CAROUSEL[FEATURED[0]]) + T.rest);
+  SHOTS.push(["展开·右滑·特写 1", cur, end]);
+  cur = end;
+}
+for (let k = 1; k < 4; k++) {
+  // 第 2–4 张：镜头大小不变，下一张从右边平移进来
+  sK.push([cur, FEATURED[k - 1], "lin"], [cur + T.pan, FEATURED[k], "pan"]);
+  scanStart.push(cur + T.panScanLead);
+  const end = scanStart[k] + scanLen(CAROUSEL[FEATURED[k]]) + T.rest;
+  SHOTS.push([`特写 ${k + 1}`, cur, end]);
+  cur = end;
+}
+const WALL_T = cur;
+const FULL_DUR = WALL_T + T.wall + T.wallHold;
+zoomK.push([WALL_T, ZC, "lin"], [WALL_T + T.wall, ZW, "wallZoom"], [FULL_DUR, 0.31, "calm"]);
+cyK.push([WALL_T, CY_C, "lin"], [WALL_T + T.wall, 0, "wall"]);
+SHOTS.push(["拉远·专利墙", WALL_T, FULL_DUR]);
+
+// 翻转卡此刻的姿态
+function flipState(t) {
+  const u = t - FLIP_T - FLIP.hold;
+  if (u <= 0) return { rotY: FLIP.rotY0, rotZ: FLIP.rotZ0, scale: FLIP.scale0, dy: FLIP.dy0 };
+  if (u <= FLIP.turn) {
+    const p = E.flipTurn(u / FLIP.turn);
+    return { rotY: lerp(FLIP.rotY0, 180, p), rotZ: lerp(FLIP.rotZ0, 0, p),
+             scale: lerp(FLIP.scale0, 1 + FLIP.overshoot, p), dy: lerp(FLIP.dy0, 0, p) };
+  }
+  const p = E.flipSettle(clamp((u - FLIP.turn) / FLIP.settle));
+  return { rotY: 180, rotZ: 0, scale: lerp(1 + FLIP.overshoot, 1, p), dy: 0 };
+}
+
+// 卡片带形状（缩小时）：下标差 d → 横向位置（几张卡宽）和缩放。左右对称，都叠在主卡后面
+const STRIP_X = { "-8":-2.15, "-7":-1.97, "-6":-1.77, "-5":-1.55, "-4":-1.31, "-3":-1.04, "-2":-0.74, "-1":-0.40,
+                  0:0, 1:0.40, 2:0.74, 3:1.04, 4:1.31, 5:1.55, 6:1.77, 7:1.97, 8:2.15 };
+const STRIP_S = { "-8":0.62, "-7":0.65, "-6":0.68, "-5":0.71, "-4":0.74, "-3":0.78, "-2":0.84, "-1":0.91,
+                  0:1, 1:0.91, 2:0.84, 3:0.78, 4:0.74, 5:0.71, 6:0.68, 7:0.65, 8:0.62 };
+// Catmull-Rom：卡片经过每个位置时速度连续，不会一顿一顿
+function strip(table, d) {
+  d = clamp(d, -8, 8);
+  const i = Math.min(7, Math.floor(d)), f = d - i;
+  const v = j => table[clamp(j, -8, 8)];
+  const p0 = v(i - 1), p1 = v(i), p2 = v(i + 1), p3 = v(i + 2);
+  return 0.5 * ((2*p1) + (-p0 + p2)*f + (2*p0 - 5*p1 + 4*p2 - p3)*f*f + (-p0 + 3*p1 - 3*p2 + p3)*f*f*f);
+}
+
+// ───────── 专利墙布局 ─────────
+const PX = CW + GAP, PY = CH + GAP;
+// ───────── 弧形专利墙（参考图排版）：3 行专利沿向上弯的椭圆弧排开，越往两边越大，顺着弧线倾斜 ─────────
+// 下面都是最终画面（1920×1080）里的像素
+const ARC = {
+  cx: 960, cy: 150, rx: 1138, ry: 590,      // 三行共用一个椭圆中心；最下一行最低点在 y=740
+  rows: [1.0, 0.82, 0.645],                  // 每行椭圆的大小比例：下、中、上
+  rowW: [1.0, 0.95, 0.9],                    // 每行卡片的基础宽度比例
+  w0: 72, grow: 1.7, gap: 1.12,              // 正中卡宽、往两边变大的程度、卡与卡的间距
+  tilt: 0.42,                                // 顺着弧线倾斜的程度（1 = 正对圆心，太歪像扇子；参考图约四成）
+  yCut: 255, yFade: 70,                      // 只要干净三排：卡片中心高过这条线就不画（上面两角不再乱），靠近时淡出
+  heroRow: 1,                                // 第 4 张特写那张落在中间一行正中
+};
+const NAMES = ["p1", "p2", "p3", "p4", "p5", "p6"];
+const arcW = (r, ph) => ARC.w0 * ARC.rowW[r] * (1 + ARC.grow * (1 - Math.cos(ph)));
+// 每行：参数角 φ → 第几个卡位（积分出来），反过来查 φ
+const ARC_TAB = ARC.rows.map((f, r) => {
+  const N = 1400, ph = [], S = [];
+  let acc = 0;
+  for (let i = 0; i <= N; i++) {
+    const p = -Math.PI + 2 * Math.PI * i / N;
+    if (i) {
+      const pm = p - Math.PI / N;
+      const speed = f * Math.hypot(ARC.rx * Math.cos(pm), ARC.ry * Math.sin(pm));
+      acc += speed / (arcW(r, pm) * ARC.gap) * (2 * Math.PI / N);
+    }
+    ph.push(p); S.push(acc);
+  }
+  const s0 = S[N / 2];
+  return { ph, S: S.map(v => v - s0) };
+});
+function slotPhi(r, s) {   // 第 s 个卡位（可带小数）对应的 φ
+  const { ph, S } = ARC_TAB[r];
+  if (s <= S[0]) return ph[0];
+  let lo = 0, hi = S.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (S[m] < s) lo = m; else hi = m; }
+  return lerp(ph[lo], ph[hi], (s - S[lo]) / (S[hi] - S[lo]));
+}
+function arcSlot(r, s) {   // 卡位 → 位置、大小、倾斜角
+  const f = ARC.rows[r], ph = slotPhi(r, s);
+  const x = ARC.cx + f * ARC.rx * Math.sin(ph), y = ARC.cy + f * ARC.ry * Math.cos(ph);
+  const w = arcW(r, ph);
+  return { x, y, w, h: w * IMG_H / IMG_W, rot: Math.atan2(ARC.cx - x, y - ARC.cy) * ARC.tilt };
+}
+const HERO_SLOT = arcSlot(ARC.heroRow, 0);
+function arcName(r, n) {   // 每个卡位放哪张专利（相邻不重复）；中间一行正中是第 4 张特写那张
+  if (r === ARC.heroRow && n === 0) return CAROUSEL[FEATURED[3]];
+  const h = ((n * 7 + r * 11) % 6 + 6) % 6;
+  return NAMES[(h + (n & 1) * 2 + r) % 6];
+}
+
+// 墙的节奏：拉远（主卡从特写缩到弧形里的卡位）→ 周围专利一张张上下滑进卡位 → 铺满后整圈沿弧线慢慢转
+const ARC_FLOW = 0.16;                       // 铺满后每秒沿弧线挪多少个卡位
+function arcShift(u) { const f = Math.max(0, u - 1.7), R = 1.2; return ARC_FLOW * (f < R ? f * f / (2 * R) : f - R / 2); }
+
+function drawCardRot(name, x, y, w, h, rot, featured, t, alpha) {
+  const rad = Math.hypot(w, h) / 2;
+  if (x + rad < 0 || x - rad > W || y + rad < 0 || y - rad > H || alpha <= 0) return;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = alpha;
+  drawCard(name, 0, 0, w, h, featured, t, true);
+  ctx.restore();
+}
+
+function drawArcWall(t) {
+  const u = t - WALL_T;
+  // 背景：白底慢慢过渡成新背景
+  const bgA = seg(E.soft, u, 0.25, 1.4);
+  if (bgA > 0) { ctx.globalAlpha = bgA; ctx.drawImage(IMGS.wallbg, 0, 0, W, H); ctx.globalAlpha = 1; }
+  // 镜头：主卡宽度从特写时的大小缩到卡位大小（对数插值），再极慢地退一点
+  const heroW0 = CW * ZC, k0 = heroW0 / HERO_SLOT.w;
+  const p = E.wallZoom(clamp(u / T.wall));
+  const k = Math.exp(lerp(Math.log(k0), 0, p)) * (1 - 0.025 * seg(E.calm, u, T.wall - 0.3, T.wall + T.wallHold));
+  const m = (k0 / Math.max(k, 1e-6) - 1) / (k0 - 1);          // 镜头中心跟着缩放走，不乱晃
+  const start = [W / 2, H / 2 - CY_C * ZC];
+  const pv = [lerp(start[0], HERO_SLOT.x, clamp(m)), lerp(start[1], HERO_SLOT.y, clamp(m))];
+  const toScr = (x, y) => [pv[0] + (x - HERO_SLOT.x) * k, pv[1] + (y - HERO_SLOT.y) * k];
+  // 特写时露在两边的两张：原地淡出（和原来一样）
+  if (u < 0.3) {
+    const zOld = (HERO_SLOT.w * k) / CW;
+    for (const d of [-1, 1]) {
+      ctx.globalAlpha = 1 - u / 0.3;
+      drawCard(CAROUSEL[FEATURED[3] + d], pv[0] + d * PX * zOld, pv[1] + (CY_C * 0) * zOld, CW * zOld, CH * zOld, -1, t);
+      ctx.globalAlpha = 1;
+    }
+  }
+  const shift = arcShift(u);
+  const list = [];
+  ARC.rows.forEach((_, r) => {
+    for (let n = -26; n <= 26; n++) {
+      const s = n + shift, TS = ARC_TAB[r].S;
+      if (s < TS[0] + 0.5 || s > TS[TS.length - 1] - 0.5) continue;   // 超出这一行一圈的卡位不画（否则会绕回来叠在中间）
+      const L = arcSlot(r, s);
+      const edgeA = clamp((L.y - ARC.yCut) / ARC.yFade);                 // 往上卷到顶角的不画，流动时到这里自然淡出/淡入
+      if (edgeA <= 0) continue;
+      const isHero = r === ARC.heroRow && n === 0;
+      let [x, y] = toScr(L.x, L.y);
+      let a = 1;
+      if (!isHero) {
+        // 每张单独进场：在主卡上方的从顶边滑下来，下方的从底边升上来，离主卡近的先到
+        const dist = Math.hypot(L.x - HERO_SLOT.x, L.y - HERO_SLOT.y) / 180;
+        const q = E.land(clamp((u - T.cards - dist * T.cardStep) / T.cardDur));
+        if (q <= 0) continue;
+        y += (L.y < HERO_SLOT.y - 4 ? -1 : 1) * H * 0.95 * (1 - q);
+        a = clamp(q * 4);
+      }
+      list.push({ r, n, x, y, w: L.w * k, h: L.h * k, rot: L.rot * clamp(m * 1.2), a: a * (isHero ? 1 : edgeA), isHero });
+    }
+  });
+  list.sort((A, B) => (A.isHero ? 1 : 0) - (B.isHero ? 1 : 0));
+  for (const c of list) drawCardRot(arcName(c.r, c.n), c.x, c.y, c.w, c.h, c.rot, c.isHero ? 3 : -1, t, c.a);
+  drawWallText(t);
+}
+
+// ───────── 文字：9 项国家专利（黑白灰） ─────────
+const WT = {
+  num: { to: 9, size: 168, y: 262 },
+  title: { text: "项国家专利", size: 72, weight: 400, track: 0.06 },
+  en: { text: "9 National Patents", size: 28, weight: 300 },
+  side: [
+    { cn: "与德国共同研发", en: "Co-developed with Germany", y: 800 },
+  ],
+  sideX: 112, lineX: 92, lineY: [752, 850],
+};
+const WT_T = () => WALL_T + 1.25;            // 文字开始
+function typeLine(text, x, y, size, weight, t0, step, t, track = 0, font = FONT) {
+  ctx.font = `${weight} ${size}px ${font}`; ctx.textBaseline = "alphabetic";
+  let cx = x, ct = t0;
+  for (const ch of text) {
+    const q = clamp((t - ct) / 0.32);
+    if (q > 0) {
+      ctx.globalAlpha = clamp(q * 2.2);
+      ctx.fillText(ch, cx, y + (1 - E.soft(q)) * size * 0.22);
+    }
+    cx += ctx.measureText(ch).width + size * track;
+    ct += step;
+  }
+  ctx.globalAlpha = 1;
+  return ct;
+}
+function textW(text, size, weight, track = 0, font = FONT) {
+  ctx.font = `${weight} ${size}px ${font}`;
+  let w = 0; for (const ch of text) w += ctx.measureText(ch).width + size * track;
+  return w - size * track;
+}
+function drawWallText(t) {
+  const t0 = WT_T();
+  if (t < t0) return;
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  ctx.shadowColor = "rgba(0,20,80,0.35)"; ctx.shadowBlur = 18;
+  // 整组居中：大数字 9 + 「项国家专利」
+  const NUMF = `200 ${WT.num.size}px "Segoe UI Light","Segoe UI",sans-serif`;
+  ctx.font = NUMF; const nw = ctx.measureText("9").width;
+  const tw = textW(WT.title.text, WT.title.size, WT.title.weight, WT.title.track);
+  const gap = 26, x0 = W / 2 - (nw + gap + tw) / 2;
+  // 数字从 0 滚到 9：上一位往上淡出、下一位从下面升上来
+  const nq = seg(E.out, t, t0, t0 + 1.1);
+  const v = 9 * nq, d = Math.floor(v), f = v - d;
+  ctx.font = NUMF; ctx.textBaseline = "alphabetic";
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0 - 40, WT.num.y - WT.num.size * 0.76, nw + 80, WT.num.size * 0.82); ctx.clip();
+  const a0 = clamp((t - t0) / 0.2);
+  if (d >= 9) { ctx.globalAlpha = a0; ctx.fillText("9", x0, WT.num.y); }
+  else {
+    const off = E.soft(f) * WT.num.size * 0.8;
+    ctx.globalAlpha = a0 * (1 - f); ctx.fillText(String(d), x0, WT.num.y - off);
+    ctx.globalAlpha = a0 * f; ctx.fillText(String(d + 1), x0, WT.num.y - off + WT.num.size * 0.8);
+  }
+  ctx.restore();
+  const T1 = WT.title;
+  typeLine(T1.text, x0 + nw + gap, WT.num.y - 6, T1.size, T1.weight, t0 + 0.2, 0.08, t, T1.track);
+  // 英文小字
+  ctx.fillStyle = "rgba(255,255,255,0.86)";
+  typeLine(WT.en.text, x0 + nw + gap + 4, WT.num.y + 46, WT.en.size, WT.en.weight, t0 + 0.55, 0.02, t, 0.02, FONT_EN);
+  ctx.fillStyle = "#fff";
+  // 左下：竖线 + 一组字
+  const s0 = t0 + 0.75;
+  const lq = seg(E.out, t, s0, s0 + 0.6);
+  if (lq > 0) {
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fillRect(WT.lineX, WT.lineY[0], 2, (WT.lineY[1] - WT.lineY[0]) * lq);
+    ctx.fillStyle = "#fff"; ctx.shadowBlur = 14;
+  }
+  WT.side.forEach((g, i) => {
+    const a = s0 + 0.15 + i * 0.45;
+    const e = typeLine(g.cn, WT.sideX, g.y, 38, 400, a, 0.055, t);
+    typeLine(g.en, WT.sideX, g.y + 30, 19, 300, e - 0.2, 0.012, t, 0, FONT_EN);
+  });
+  ctx.restore();
+}
+
+// ───────── 图片 ─────────
+const IMGS = {};
+function loadAll() {
+  const jobs = [];
+  for (let i = 1; i <= 6; i++) for (const suf of ["", "_blank"]) {
+    const key = `p${i}${suf}`, im = new Image();
+    im.src = `assets/${key}.jpg`;
+    IMGS[key] = im;
+    jobs.push(im.decode());
+  }
+  IMGS.wallbg = new Image();
+  IMGS.wallbg.src = "assets/wallbg.jpg";
+  jobs.push(IMGS.wallbg.decode());
+  return Promise.all(jobs);
+}
+
+// ───────── 画一张证书 ─────────
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+ctx.imageSmoothingQuality = "high";
+
+function drawCard(name, sx, sy, sw, sh, featured, t, lite = false) {
+  const x = sx - sw/2, y = sy - sh/2;
+  if (x > W || y > H || x + sw < 0 || y + sh < 0) return;
+  // 阴影：白底上让证书浮起来一点
+  if (sh > 250 && !lite) {   // 墙上几十张卡用轻量阴影，不然拉远那一刻每帧要 20ms
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.16)";
+    ctx.shadowBlur = Math.min(40, sh * 0.03);
+    ctx.shadowOffsetY = Math.min(16, sh * 0.012);
+    ctx.fillStyle = "#f3eee4";
+    ctx.fillRect(x, y, sw, sh);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = "rgba(0,0,0,0.07)";
+    ctx.fillRect(x - 1, y - 1, sw + 2, sh + 3);
+  }
+  const t0 = featured >= 0 ? scanStart[featured] : -1;
+  if (featured < 0 || t >= t0 + scanLen(name)) { ctx.drawImage(IMGS[name], x, y, sw, sh); return; }
+  ctx.drawImage(IMGS[name + "_blank"], x, y, sw, sh);
+  if (t < t0) return;
+  const k = sw / IMG_W;
+  window.PATENT_ROWS[name].rows.forEach((r, j) => {
+    const p = clamp((t - t0 - rowStart(j)) / rowDur(r));
+    if (p <= 0) return;
+    // 按字出现：已出现的字整段画出，正在出现的那个字淡入
+    const g = r.glyphs, n = g.length, rh = r.y1 - r.y0;
+    const done = Math.floor(p * n), frac = p * n - done;
+    const base = ctx.globalAlpha;
+    const draw = (gx0, gx1, alpha) => {
+      ctx.globalAlpha = alpha * base;
+      ctx.drawImage(IMGS[name], gx0, r.y0, gx1 - gx0, rh, x + gx0 * k, y + r.y0 * k, (gx1 - gx0) * k, rh * k);
+      ctx.globalAlpha = base;
+    };
+    if (done > 0) draw(r.x0, Math.min(r.x1, done < n ? g[done][0] : r.x1), 1);
+    if (done < n && frac > 0) draw(g[done][0], g[done][1], frac);
+  });
+}
+
+// ───────── Logo 翻转卡 ─────────
+// canvas 没有 3D，按竖条切开逐条做透视投影，效果等同 CSS perspective + rotateY
+const LOGO_CROP = { sx: 0, sy: (1672 - 941 * IMG_H / IMG_W) / 2, sw: 941, sh: 941 * IMG_H / IMG_W };
+function drawFlip(t) {
+  const st = flipState(t);
+  const w = CW * ZK * st.scale, h = CH * ZK * st.scale;
+  const th = st.rotY * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+  const D = FLIP.perspective * CW * ZK;
+  const front = cos >= 0;
+  const N = 96;
+  const proj = x => x * cos * D / (D + x * sin);
+  ctx.save();
+  ctx.translate(W / 2, H / 2 + st.dy * CH * ZK);
+  ctx.rotate(st.rotZ * Math.PI / 180);
+  // 阴影：按投影后的外框画
+  const xl = proj(-w / 2), xr = proj(w / 2);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.16)";
+  ctx.shadowBlur = 36;
+  ctx.shadowOffsetY = 14;
+  ctx.fillStyle = front ? "#fff" : "#f3eee4";
+  const fl = D / (D - w / 2 * sin), fr = D / (D + w / 2 * sin);
+  ctx.beginPath();
+  ctx.moveTo(xl, -h / 2 * fl); ctx.lineTo(xr, -h / 2 * fr); ctx.lineTo(xr, h / 2 * fr); ctx.lineTo(xl, h / 2 * fl);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  for (let i = 0; i < N; i++) {
+    const xa = -w / 2 + w * i / N, xb = xa + w / N, xm = (xa + xb) / 2;
+    const pa = proj(xa), pb = proj(xb), f = D / (D + xm * sin);
+    const left = Math.min(pa, pb), dw = Math.abs(pb - pa) + 0.6, dh = h * f;
+    if (front) {
+      const u0 = (xa + w / 2) / w;
+      ctx.drawImage(IMGS.logo, LOGO_CROP.sx + u0 * LOGO_CROP.sw, LOGO_CROP.sy, LOGO_CROP.sw / N, LOGO_CROP.sh, left, -dh / 2, dw, dh);
+    } else {
+      const u0 = (w / 2 - xb) / w;   // 背面左右镜像，转到 180° 时正好是正的
+      ctx.drawImage(IMGS[CAROUSEL[0]], u0 * IMG_W, 0, IMG_W / N, IMG_H, left, -dh / 2, dw, dh);
+    }
+  }
+  ctx.restore();
+}
+
+// ───────── 一帧 ─────────
+// 这一段只要第一段最后的“拉远 → 弧形专利墙 + 文字”：画面时间 0 = 第一段的 WALL_T
+const DUR = FULL_DUR - WALL_T;
+const CLIP_SHOTS = [["拉远·专利进场", 0, T.wall], ["文字", T.wall - 0.55, DUR]];
+function render(t) { renderFull(t + WALL_T); }
+function renderFull(t) {
+  const z = track(zoomK, t, true);
+  const camY = track(cyK, t);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, W, H);
+  const toScreen = (wx, wy) => [W/2 + wx * z, H/2 + (wy - camY) * z];
+
+  if (t < WALL_T) {
+    // 卡片带左右对称、都叠在主卡后面；推到特写时变成等距一排（m 跟着镜头大小走）
+    const m = clamp(Math.log(z / ZK) / Math.log(ZC / ZK));
+    const s = track(sK, t);
+    const flipping = t < FLIP_END;
+    // 翻转转过侧面、专利面一露出来，左右就同时往外展开
+    const e = E.spread(clamp((t - SPREAD_T) / T.spread));
+    const fade = clamp((t - SPREAD_T) / 0.08);
+    const list = [];
+    if (t >= SPREAD_T) for (let i = Math.floor(s) - 8; i <= Math.floor(s) + 8; i++) {
+      const name = CAROUSEL[i]; if (!name) continue;
+      const d = i - s;
+      if (flipping && i === 0) continue;               // 主卡还在翻，单独画
+      const wx = lerp(strip(STRIP_X, d) * CW, d * PX, m) * (i === 0 ? 1 : e);
+      const sc = lerp(0.7, lerp(strip(STRIP_S, d), 1, m), d === 0 ? 1 : e);
+      list.push({ i, name, wx, sc, key: -Math.abs(d) });   // 离中间越近越在上面
+    }
+    list.sort((a, b) => a.key - b.key);
+    for (const c of list) {
+      const [sx, sy] = toScreen(c.wx, 0);
+      ctx.globalAlpha = c.i === 0 ? 1 : fade;
+      drawCard(c.name, sx, sy, CW * c.sc * z, CH * c.sc * z, FEATURED.indexOf(c.i), t);
+      ctx.globalAlpha = 1;
+    }
+    if (flipping) drawFlip(t);
+  } else {
+    drawArcWall(t);   // 弧形专利墙 + 文字
+  }
+}
+
+// ───────── 播放器 ─────────
+let t = 0, playing = true, last = null;
+const $ = id => document.getElementById(id);
+const scrub = $("scrub");
+scrub.max = DUR;
+$("meta").textContent = `16:9 · ${DUR.toFixed(1)} 秒`;
+function show() {
+  render(t);
+  scrub.value = t;
+  $("time").textContent = `${t.toFixed(2)} / ${DUR.toFixed(2)}s`;
+  $("play").textContent = playing ? "暂停" : "播放";
+}
+function tick(now) {
+  if (playing) {
+    if (last != null) t += (now - last) / 1000 * parseFloat($("speed").value);
+    if (t >= DUR) { if ($("loop").checked) t = 0; else { t = DUR; playing = false; } }
+    show();
+  }
+  last = now;
+  requestAnimationFrame(tick);
+}
+$("play").onclick = () => { if (!playing && t >= DUR) t = 0; playing = !playing; show(); };
+$("restart").onclick = () => { t = 0; playing = true; show(); };
+scrub.oninput = () => { t = parseFloat(scrub.value); playing = false; show(); };
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); $("play").click(); }
+  if (e.code === "ArrowRight") { playing = false; t = Math.min(DUR, t + 1/30); show(); }
+  if (e.code === "ArrowLeft")  { playing = false; t = Math.max(0, t - 1/30); show(); }
+});
+CLIP_SHOTS.forEach(([label, a, b]) => {
+  const d = document.createElement("div");
+  d.textContent = label;
+  d.style.left = `${a / DUR * 100}%`;
+  d.style.width = `${(b - a) / DUR * 100}%`;
+  d.onclick = () => { t = a; playing = false; show(); };
+  $("shots").appendChild(d);
+});
+
+window.__render = tt => { t = tt; playing = false; show(); };   // 截图检查用
+loadAll().then(() => { show(); requestAnimationFrame(tick); });
+</script>
+</body>
+</html>

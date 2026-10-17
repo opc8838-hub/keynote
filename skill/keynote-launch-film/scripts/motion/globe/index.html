@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>文字地球 v3</title>
+<style>
+  body { margin:0; background:#1d1d1f; color:#ddd; font:13px system-ui, sans-serif; }
+  .wrap { max-width:1280px; margin:0 auto; padding:16px; }
+  canvas { display:block; width:100%; aspect-ratio:16/9; background:#000; }
+  .bar { display:flex; gap:12px; align-items:center; margin-top:10px; }
+  #scrub { flex:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="cv" width="1920" height="1080"></canvas>
+  <div class="bar"><button id="play">暂停</button><span id="time"></span><input id="scrub" type="range" min="0" step="0.001" value="0"></div>
+</div>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="vendor/land.js"></script>
+<script>
+// v3：暗场 + 单词拼成的 3D 地球。镜头从远处推近 → 东莞点亮 → 发光弧线依次飞向 6 座城市（到达时脉冲 + 卡片）
+//     → 镜头略拉远，6 条弧线同时亮着、光点沿弧线流动。地球中心逐渐往北倾（从北极上方俯看），洛杉矶也在正面。
+// 地址后加 #debug 显示城市坐标
+const W = 1920, H = 1080;
+const DEBUG = location.hash.includes("debug");
+const LEAD = 0.6;                 // 第 10 句配音在本段第几秒开始（mp3 开头）
+const DUR = 8.4;                  // 总长（ACT5 用前 7.9 秒）
+const R_REF = 410;                // 单词网格按这个半径排版（字号随镜头缩放）
+// 城市：at = 到达时间（相对第 10 句 mp3 开头，按语音能量切分：美国 2.45 / 德国 2.95 / 英国 3.48 / 马来西亚 4.02 / 沙特 4.85 / 比利时 5.65）
+// ox, oy = 卡片左上角相对城市点的偏移（像素）
+const CITIES = [
+  { zh: "东莞", en: "Dongguan", cn: "中国", lat: 23.02, lon: 113.75, utc: 8, at: 1.30, home: true, ox: 58, oy: -30 },
+  { zh: "洛杉矶", en: "Los Angeles", cn: "美国", lat: 34.05, lon: -118.24, utc: -7, at: 2.45, ox: 60, oy: -40 },
+  { zh: "柏林", en: "Berlin", cn: "德国", lat: 52.52, lon: 13.40, utc: 2, at: 2.95, ox: 30, oy: -250, hk: 0.75 },
+  { zh: "伦敦", en: "London", cn: "英国", lat: 51.51, lon: -0.13, utc: 1, at: 3.48, ox: -470, oy: -190, hk: 1.3 },
+  { zh: "吉隆坡", en: "Kuala Lumpur", cn: "马来西亚", lat: 3.14, lon: 101.69, utc: 8, at: 4.02, ox: -400, oy: -78 },
+  { zh: "利雅得", en: "Riyadh", cn: "沙特阿拉伯", lat: 24.71, lon: 46.68, utc: 3, at: 4.85, ox: -440, oy: -30 },
+  { zh: "布鲁塞尔", en: "Brussels", cn: "比利时", lat: 50.85, lon: 4.35, utc: 2, at: 5.65, ox: -460, oy: 6, hk: 1.0 },
+];
+const CARD_W = 340, CARD_H = 124;
+const BASE_UTC_SEC = (12 * 3600 + 30 * 60);   // 东莞 20:30 → UTC 12:30
+const WORDS = ["care", "home", "rise", "turn", "stand", "rest", "family", "morning", "gentle", "steady",
+  "independence", "comfort", "sleep", "together", "lianying", "dignity", "life", "safe", "daily", "easy"];
+const LIGHT = "255,255,255", WARM = "255,244,226";
+
+// ───────── 工具 ─────────
+function bezier(x1, y1, x2, y2) {
+  const cx = 3*x1, bx = 3*(x2 - x1) - cx, ax = 1 - cx - bx, cy = 3*y1, by = 3*(y2 - y1) - cy, ay = 1 - cy - by;
+  const X = t => ((ax*t + bx)*t + cx)*t, Y = t => ((ay*t + by)*t + cy)*t;
+  return x => { let lo = 0, hi = 1, t = x; for (let i = 0; i < 24; i++) { t = (lo + hi) / 2; if (X(t) < x) lo = t; else hi = t; } return Y(t); };
+}
+const E = { soft: bezier(0.4, 0, 0.2, 1), calm: bezier(0.45, 0, 0.55, 1), out: bezier(0.2, 0, 0, 1), fly: bezier(0.35, 0, 0.25, 1), push: bezier(0.3, 0, 0.1, 1) };
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (f, t, a, b) => { const u = clamp((t - a) / (b - a)); return u <= 0 ? 0 : u >= 1 ? 1 : f(u); };
+const lerp = (a, b, m) => a + (b - a) * m;
+const D2R = Math.PI / 180;
+const FONT_CN = '"DengXian","等线","Microsoft YaHei",sans-serif';
+const FONT_EN = '"Segoe UI","Segoe UI Light",sans-serif';
+const vec = (lat, lon) => [Math.cos(lat * D2R) * Math.cos(lon * D2R), Math.cos(lat * D2R) * Math.sin(lon * D2R), Math.sin(lat * D2R)];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+// ───────── 镜头 ─────────
+// 推近：R 110 → 500（0–2.2s）；飞线期间慢慢 500 → 470；最后 6.3–8.4s 拉远到 400
+function camAt(t) {
+  const R = t < 2.3 ? lerp(110, 500, E.push(clamp(t / 2.3)))
+          : t < 6.3 ? lerp(500, 466, E.calm(clamp((t - 2.3) / 4.0)))
+          : lerp(466, 396, E.soft(clamp((t - 6.3) / 2.1)));
+  const lat = 20 + 38 * E.soft(clamp((t - 0.3) / 2.9)) + 8 * E.calm(clamp((t - 3.2) / 5.2));
+  const lon = 152 - 34 * E.soft(clamp(t / 3.2)) - 4 * E.calm(clamp((t - 3.2) / 5.2));
+  const cy = lerp(540, 468, E.calm(clamp((t - 0.6) / 3.2)));   // 地球偏上，底部留给字幕
+  return { R, lat, lon, cx: 960, cy };
+}
+function basis(cam) {
+  const p = cam.lat * D2R, l = cam.lon * D2R;
+  return { right: [-Math.sin(l), Math.cos(l), 0], up: [-Math.sin(p) * Math.cos(l), -Math.sin(p) * Math.sin(l), Math.cos(p)],
+           fwd: [Math.cos(p) * Math.cos(l), Math.cos(p) * Math.sin(l), Math.sin(p)] };
+}
+function proj(v, cam, B, r = 1) {
+  const sx = dot(v, B.right) * r, sy = dot(v, B.up) * r, z = dot(v, B.fwd) * r;
+  return { x: cam.cx + cam.R * sx, y: cam.cy - cam.R * sy, z, rho: Math.hypot(sx, sy) };
+}
+
+// ───────── 陆地遮罩（等距圆柱投影栅格） ─────────
+const MW = 1440, MH = 720;
+const mask = document.createElement("canvas"); mask.width = MW; mask.height = MH;
+let MASK = null;
+function buildMask() {
+  const m = mask.getContext("2d");
+  m.fillStyle = "#000"; m.fillRect(0, 0, MW, MH);
+  m.fillStyle = "#fff";
+  const land = topojson.feature(LAND, LAND.objects.land);
+  const polys = [];
+  for (const f of land.features) {
+    const g = f.geometry;
+    if (g.type === "Polygon") polys.push(g.coordinates); else if (g.type === "MultiPolygon") polys.push(...g.coordinates);
+  }
+  const px = lon => (lon + 180) / 360 * MW, py = lat => (90 - lat) / 180 * MH;
+  for (const poly of polys) {
+    let skip = false;
+    const rings = poly.map(ring => {
+      const out = []; let prev = null, off = 0;
+      for (const [lo, la] of ring) { if (prev !== null) { const d = lo - prev; if (d > 180) off -= 360; else if (d < -180) off += 360; } prev = lo; out.push([lo + off, la]); }
+      const span = Math.max(...out.map(p => p[0])) - Math.min(...out.map(p => p[0]));
+      if (span > 350) skip = true;
+      return out;
+    });
+    if (skip) continue;
+    for (const shift of [-360, 0, 360]) {
+      m.beginPath();
+      for (const ring of rings) { ring.forEach(([lo, la], i) => i ? m.lineTo(px(lo + shift), py(la)) : m.moveTo(px(lo + shift), py(la))); m.closePath(); }
+      m.fill("evenodd");
+    }
+  }
+  m.fillRect(0, py(-66), MW, MH);   // 南极洲
+  MASK = m.getImageData(0, 0, MW, MH).data;
+}
+function isLand(lat, lon) {
+  lon = ((lon + 180) % 360 + 360) % 360 - 180;
+  const x = Math.min(MW - 1, Math.floor((lon + 180) / 360 * MW)), y = Math.min(MH - 1, Math.max(0, Math.floor((90 - lat) / 180 * MH)));
+  return MASK[(y * MW + x) * 4] > 127;
+}
+
+// ───────── 单词网格：等纬度间隔的行，每行沿纬线排满单词（球面上排版，任意角度都对） ─────────
+const ROW_H = 14.5, FS = 12.5;
+let WORDSET = [];
+function buildGrid() {
+  const ctx = cv.getContext("2d");
+  ctx.font = `500 ${FS}px ${FONT_EN}`;
+  const dlat = ROW_H / R_REF / D2R;
+  let wi = 0, k = 0;
+  for (let lat = -76; lat <= 76; lat += dlat, k++) {
+    const rr = R_REF * Math.cos(lat * D2R);
+    if (rr < 40) continue;
+    const startLon = (k * 37) % 360 - 180;
+    let lon = startLon;
+    while (true) {
+      const w = WORDS[(wi * 7 + k * 3) % WORDS.length]; wi++;
+      const ww = ctx.measureText(w).width, pw = ww + 9;
+      const dl = pw / rr / D2R;
+      if (lon + dl > startLon + 360) break;
+      const mid = lon + dl / 2;
+      // 按陆地/海洋把字母分成几段（同类连续的一起画）
+      const runs = []; let acc = -ww / 2, cur = null;
+      for (const ch of w) {
+        const cw = ctx.measureText(ch).width;
+        const land = isLand(lat, mid + (acc + cw / 2) / rr / D2R);
+        if (cur && cur.land === land) cur.s += ch; else { cur = { s: ch, off: acc, land }; runs.push(cur); }
+        acc += cw;
+      }
+      const l = mid * D2R, p = lat * D2R;
+      WORDSET.push({ v: vec(lat, mid), e: [-Math.sin(l), Math.cos(l), 0], n: [-Math.sin(p) * Math.cos(l), -Math.sin(p) * Math.sin(l), Math.cos(p)], runs,
+                     anyLand: runs.some(r => r.land) });
+      lon += dl;
+    }
+  }
+}
+
+// ───────── 弧线 ─────────
+const HOME = CITIES[0];
+function slerp(a, b, s) {
+  const om = Math.acos(clamp(dot(a, b), -1, 1)), so = Math.sin(om);
+  if (so < 1e-6) return a.slice();
+  const ka = Math.sin((1 - s) * om) / so, kb = Math.sin(s * om) / so;
+  return [a[0] * ka + b[0] * kb, a[1] * ka + b[1] * kb, a[2] * ka + b[2] * kb];
+}
+function buildArcs() {
+  const A = vec(HOME.lat, HOME.lon);
+  for (const c of CITIES) {
+    c.v = vec(c.lat, c.lon);
+    if (c.home) continue;
+    const om = Math.acos(clamp(dot(A, c.v), -1, 1));
+    const hmax = (0.05 + 0.32 * om / Math.PI) * (c.hk || 1);
+    const N = 90; c.arc = [];
+    for (let i = 0; i <= N; i++) { const s = i / N; const r = 1 + hmax * Math.sin(Math.PI * s); c.arc.push({ v: slerp(A, c.v, s), r }); }
+    c.fly = 0.62 + 0.35 * om / Math.PI;          // 飞行时长（远的飞得久一点）
+  }
+}
+function arcPts(c, cam, B) {
+  return c.arc.map(({ v, r }) => {
+    const p = proj(v, cam, B, r);
+    // 在地球背面且被球挡住 → 不可见（边缘柔和过渡）
+    p.vis = p.z >= 0 ? 1 : clamp((p.rho - 0.985) / 0.03);
+    return p;
+  });
+}
+function strokePath(pts, i0, i1, width, alpha) {
+  if (i1 - i0 < 1) return;
+  ctx.lineWidth = width;
+  for (let i = i0; i < i1; i++) {
+    const a = pts[i], b = pts[i + 1], v = Math.min(a.vis, b.vis);
+    if (v <= 0.01) continue;
+    ctx.strokeStyle = `rgba(${LIGHT},${alpha * v})`;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+}
+function glowDot(x, y, r, a, col = WARM) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.25, `rgba(${col},${a * 0.45})`); g.addColorStop(1, `rgba(${col},0)`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+function ptAt(pts, s) {
+  const f = s * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), u = f - i, a = pts[i], b = pts[i + 1];
+  return { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), vis: Math.min(a.vis, b.vis), i };
+}
+// 地面上的一圈（脉冲）：以城市为中心、角半径 ang（度）
+function surfaceRing(c, ang, cam, B) {
+  const v = c.v, l = c.lon * D2R, p = c.lat * D2R;
+  const e = [-Math.sin(l), Math.cos(l), 0], n = [-Math.sin(p) * Math.cos(l), -Math.sin(p) * Math.sin(l), Math.cos(p)];
+  const a = ang * D2R, ca = Math.cos(a), sa = Math.sin(a);
+  ctx.beginPath();
+  for (let i = 0; i <= 48; i++) {
+    const th = i / 48 * Math.PI * 2, co = Math.cos(th) * sa, si = Math.sin(th) * sa;
+    const q = [v[0] * ca + e[0] * co + n[0] * si, v[1] * ca + e[1] * co + n[1] * si, v[2] * ca + e[2] * co + n[2] * si];
+    const s = proj(q, cam, B);
+    i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
+  }
+}
+
+// ───────── 一帧 ─────────
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+function fmt(sec) { sec = ((Math.floor(sec) % 86400) + 86400) % 86400; const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec % 60; return [h, m, s].map(v => String(v).padStart(2, "0")).join(":"); }
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  const cam = camAt(t), B = basis(cam), R = cam.R;
+  const intro = seg(E.soft, t, 0, 0.7);
+  // 背景：极淡的中心光
+  let g = ctx.createRadialGradient(cam.cx, cam.cy, R * 0.2, cam.cx, cam.cy, R * 2.4);
+  g.addColorStop(0, `rgba(40,42,48,${0.55 * intro})`); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // 大气层：球边一圈很淡的白光
+  g = ctx.createRadialGradient(cam.cx, cam.cy, R * 0.96, cam.cx, cam.cy, R * 1.16);
+  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.2, `rgba(220,228,240,${0.13 * intro})`); g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cam.cx, cam.cy, R * 1.16, 0, Math.PI * 2); ctx.fill();
+  // 球体：比背景略亮一点的圆盘
+  g = ctx.createRadialGradient(cam.cx - R * 0.3, cam.cy - R * 0.35, R * 0.1, cam.cx, cam.cy, R);
+  g.addColorStop(0, `rgba(26,27,31,${intro})`); g.addColorStop(1, `rgba(8,8,10,${intro})`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cam.cx, cam.cy, R, 0, Math.PI * 2); ctx.fill();
+
+  // 单词
+  const k = R / R_REF;
+  ctx.textBaseline = "middle"; ctx.textAlign = "left"; ctx.font = `500 ${FS}px ${FONT_EN}`;
+  const ldx = -0.45, ldy = 0.55;   // 光从左上来：亮面更亮
+  for (const wd of WORDSET) {
+    const z = dot(wd.v, B.fwd);
+    if (z <= 0.03) continue;
+    const sx = dot(wd.v, B.right), sy = dot(wd.v, B.up);
+    const er = dot(wd.e, B.right), eu = dot(wd.e, B.up), nr = dot(wd.n, B.right), nu = dot(wd.n, B.up);
+    ctx.setTransform(k * er, -k * eu, -k * nr, k * nu, cam.cx + R * sx, cam.cy - R * sy);
+    const limb = clamp((z - 0.03) / 0.4);
+    const shade = 0.72 + 0.28 * clamp(sx * ldx + sy * ldy + 0.5);
+    for (const r of wd.runs) {
+      if (r.land) { ctx.globalAlpha = (0.25 + 0.75 * limb) * shade * 0.78 * intro; ctx.fillStyle = "#d1d1d6"; }
+      else { ctx.globalAlpha = 0.11 * limb * intro; ctx.fillStyle = "#8e8e93"; }
+      ctx.fillText(r.s, r.off, 0);
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+
+  // ── 光：弧线 + 光点 + 脉冲（叠加发光） ──
+  ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round";
+  const tHome = LEAD + HOME.at;
+  const homeP = proj(HOME.v, cam, B);
+  const fin = seg(E.calm, t, LEAD + CITIES[6].at + 0.3, LEAD + CITIES[6].at + 1.2);   // 全部到齐后整体再亮一点
+  for (const c of CITIES) {
+    if (c.home) continue;
+    const tA = LEAD + c.at, t0 = tA - c.fly;
+    if (t < t0) continue;
+    const pts = arcPts(c, cam, B);
+    const N = pts.length - 1;
+    const h = seg(E.fly, t, t0, tA);              // 飞行进度
+    const ih = Math.max(1, Math.round(h * N));
+    // 已画出的线：宽淡 + 窄亮两层
+    const settle = clamp((t - tA) / 0.8);
+    const baseA = lerp(0.85, 0.5, settle) + 0.15 * fin;
+    strokePath(pts, 0, ih, 10, 0.05 * baseA);
+    strokePath(pts, 0, ih, 4, 0.14 * baseA);
+    strokePath(pts, 0, ih, 1.6, 0.8 * baseA);
+    if (h < 1) {
+      // 彗星：头部附近一段更亮
+      const tail = Math.max(0, ih - 14);
+      strokePath(pts, tail, ih, 2.4, 0.9);
+      const hp = pts[ih];
+      glowDot(hp.x, hp.y, 26, 0.9 * hp.vis); glowDot(hp.x, hp.y, 6, 1.0 * hp.vis, LIGHT);
+    } else {
+      // 到达后：光点沿弧线循环流动（每条线错开相位）
+      const idx = CITIES.indexOf(c);
+      for (let j = 0; j < 2; j++) {
+        const ph = ((t - tA) / 1.6 + idx * 0.37 + j * 0.5) % 1;
+        if (t - tA < 0.4 && j === 0) continue;
+        const s = E.calm(ph);
+        const q = ptAt(pts, s), qi = q.i;
+        const fade = Math.sin(Math.PI * ph);
+        strokePath(pts, Math.max(0, qi - 8), qi, 2.0, 0.55 * fade);
+        glowDot(q.x, q.y, 12, 0.7 * fade * q.vis); glowDot(q.x, q.y, 3.5, 0.9 * fade * q.vis, LIGHT);
+      }
+    }
+    // 到达：脉冲两圈 + 城市点亮
+    const cp = proj(c.v, cam, B), cvis = clamp((cp.z - 0.02) / 0.12);
+    if (t >= tA && cvis > 0) {
+      for (let j = 0; j < 2; j++) {
+        const u = clamp((t - tA - j * 0.22) / 1.1);
+        if (u > 0 && u < 1) { ctx.strokeStyle = `rgba(${LIGHT},${(1 - u) * 0.85 * cvis})`; ctx.lineWidth = 2.2 * (1 - u) + 0.6; surfaceRing(c, 0.6 + 7 * E.out(u), cam, B); ctx.stroke(); }
+      }
+      const fl = 1 + 1.6 * Math.exp(-(t - tA) * 5);       // 到达瞬间一闪
+      glowDot(cp.x, cp.y, 22 * fl, 0.55 * cvis); glowDot(cp.x, cp.y, 5, cvis, LIGHT);
+    }
+  }
+  // 东莞：点亮 + 三圈大脉冲 + 呼吸光
+  {
+    const hv = clamp((homeP.z - 0.02) / 0.12);
+    if (t >= tHome - 0.1 && hv > 0) {
+      const q = seg(E.out, t, tHome - 0.1, tHome + 0.3);
+      for (let j = 0; j < 3; j++) {
+        const u = clamp((t - tHome - j * 0.28) / 1.4);
+        if (u > 0 && u < 1) { ctx.strokeStyle = `rgba(${LIGHT},${(1 - u) * 0.9 * hv})`; ctx.lineWidth = 2.6 * (1 - u) + 0.6; surfaceRing(HOME, 0.8 + 11 * E.out(u), cam, B); ctx.stroke(); }
+      }
+      const br = 0.8 + 0.2 * Math.sin((t - tHome) * 3.0);
+      const fl = 1 + 2.2 * Math.exp(-(t - tHome) * 4);
+      glowDot(homeP.x, homeP.y, 34 * fl, 0.65 * q * br * hv); glowDot(homeP.x, homeP.y, 7, q * hv, LIGHT);
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  // ── 卡片 ──
+  for (const c of CITIES) {
+    const tA = LEAD + c.at;
+    const q = seg(E.out, t, tA + 0.02, tA + 0.42);
+    if (q <= 0) continue;
+    const cp = proj(c.v, cam, B);
+    const x = clamp(cp.x + c.ox, 40, W - 40 - CARD_W), y = clamp(cp.y + c.oy, 36, 900 - CARD_H);   // 不出画、不进字幕区
+    // 引线：城市点 → 卡片最近的边的中点，先画线再出卡
+    const ex = c.ox < 0 ? x + CARD_W : x, ey = clamp(cp.y, y + 24, y + CARD_H - 24);
+    const lq = seg(E.soft, t, tA, tA + 0.3);
+    const sx0 = cp.x + (ex - cp.x) * 0.06, sy0 = cp.y + (ey - cp.y) * 0.06;     // 离开点一点再起线
+    ctx.globalAlpha = 0.5; ctx.strokeStyle = "#d1d1d6"; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(lerp(sx0, ex, lq), lerp(sy0, ey, lq)); ctx.stroke();
+    ctx.save();
+    ctx.globalAlpha = q;
+    const sc = lerp(0.94, 1, q), ax = c.ox < 0 ? x + CARD_W : x;
+    ctx.translate(ax, ey); ctx.scale(sc, sc); ctx.translate(-ax, -ey);
+    const dark = !c.home;
+    ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 30; ctx.shadowOffsetY = 8;
+    ctx.fillStyle = dark ? "rgba(30,30,32,0.88)" : "#f5f5f7";
+    roundRect(x, y, CARD_W, CARD_H, 18); ctx.fill();
+    ctx.shadowColor = "transparent";
+    if (dark) { ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 1.2; roundRect(x + 0.6, y + 0.6, CARD_W - 1.2, CARD_H - 1.2, 18); ctx.stroke(); }
+    ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    const ink = dark ? "#ffffff" : "#1d1d1f", sub = dark ? "#aeaeb2" : "#6e6e73";
+    ctx.fillStyle = ink; ctx.font = `400 42px ${FONT_CN}`; ctx.fillText(c.zh, x + 26, y + 54);
+    const zw = ctx.measureText(c.zh).width;
+    ctx.fillStyle = sub; ctx.font = `400 22px ${FONT_EN}`; ctx.fillText(c.en, x + 38 + zw, y + 52);
+    ctx.fillStyle = ink; ctx.font = `400 28px "Consolas","Segoe UI",monospace`;
+    ctx.fillText(fmt(BASE_UTC_SEC + c.utc * 3600 + t), x + 26, y + 98);
+    ctx.fillStyle = sub; ctx.font = `400 23px ${FONT_CN}`;
+    ctx.fillText(c.cn, x + 172, y + 97);
+    ctx.restore();
+    if (DEBUG) { ctx.fillStyle = "#f00"; ctx.fillRect(cp.x - 3, cp.y - 3, 6, 6); }
+  }
+  ctx.globalAlpha = 1;
+  // 右下角小字
+  ctx.globalAlpha = 0.7 * intro; ctx.fillStyle = "#8e8e93"; ctx.font = `400 15px ${FONT_EN}`; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+  ctx.fillText("L I A N Y I N G   ·   W O R L D W I D E", W - 80, H - 56);
+  ctx.textAlign = "left"; ctx.globalAlpha = 1;
+  if (DEBUG) { ctx.fillStyle = "#f00"; ctx.font = "20px monospace"; ctx.fillText(`t=${t.toFixed(2)} R=${R.toFixed(0)} lat=${cam.lat.toFixed(1)} lon=${cam.lon.toFixed(1)}`, 20, 30); }
+}
+
+// ───────── 播放器 ─────────
+window.__ready = false;
+let T = 0, playing = true, last = null;
+const $ = id => document.getElementById(id);
+$("scrub").max = DUR;
+function show() { render(T); $("scrub").value = T; $("time").textContent = `${T.toFixed(2)} / ${DUR}s`; }
+function tick(now) { if (playing) { if (last != null) T += (now - last) / 1000; if (T > DUR) T = 0; show(); } last = now; requestAnimationFrame(tick); }
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "暂停" : "播放"; };
+$("scrub").oninput = () => { T = parseFloat($("scrub").value); playing = false; show(); };
+window.__render = tt => { T = tt; playing = false; show(); };
+document.fonts.load(`14px ${FONT_EN}`).then(() => document.fonts.load(`25px ${FONT_CN}`)).then(() => document.fonts.load(`25px Consolas`)).then(() => {
+  buildMask(); buildGrid(); buildArcs(); show(); window.__ready = true; requestAnimationFrame(tick);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>舞台大屏</title>
+<style>
+  body { margin:0; background:#1d1d1f; color:#ddd; font:13px system-ui, sans-serif; }
+  .wrap { max-width:1280px; margin:0 auto; padding:16px; }
+  canvas { display:block; width:100%; background:#fff; }
+  .bar { display:flex; gap:12px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+  #scrub { flex:1; }
+  a { color:#aaa; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="cv" width="2440" height="1000"></canvas>
+  <div class="bar">
+    <button id="play">暂停</button><span id="time"></span><input id="scrub" type="range" min="0" step="0.001" value="0">
+    <a href="#act1open" onclick="setTimeout(()=>location.reload())">开场</a>
+    <a href="#logo_top" onclick="setTimeout(()=>location.reload())">S3 logo</a>
+    <a href="#timeline" onclick="setTimeout(()=>location.reload())">历程</a>
+    <a href="#ending" onclick="setTimeout(()=>location.reload())">结尾(v2)</a>
+    <a href="#finale" onclick="setTimeout(()=>location.reload())">结尾 v3 揭幕</a>
+  </div>
+</div>
+<script>
+// 舞台大屏内容（白底深灰字，合成时按“正片叠底”贴进白色大屏）
+// 地址后加 #程序名[:时长]：act1open / logo_top / timeline / ending
+const [PROG, DUR_ARG, P2, W_ARG] = (location.hash.slice(1) || "act1open").split(":");   // 第 4 个参数：画布宽（按大屏真实宽高比，高固定 1000）
+const SL = P2 ? parseFloat(P2) : 1.05;   // 结尾：slogan 开始逐字的时间（logo 在 0 秒开始淡入）
+const SIZES = { act1open: [2440, 1000], logo_top: [2400, 1000], timeline: [2300, 1000], ending: [2440, 1000], finale: [2440, 1000] };
+const DURS = { act1open: 4.6, logo_top: 1, timeline: 5.2, ending: 6.0, finale: 11.2 };
+const [W0, H] = SIZES[PROG] || SIZES.act1open;
+const W = W_ARG ? parseInt(W_ARG) : W0;
+const DUR = DUR_ARG ? parseFloat(DUR_ARG) : DURS[PROG];
+const cv = document.getElementById("cv"); cv.width = W; cv.height = H;
+const ctx = cv.getContext("2d");
+
+function bezier(x1, y1, x2, y2) {
+  const cx = 3*x1, bx = 3*(x2 - x1) - cx, ax = 1 - cx - bx, cy = 3*y1, by = 3*(y2 - y1) - cy, ay = 1 - cy - by;
+  const X = t => ((ax*t + bx)*t + cx)*t, Y = t => ((ay*t + by)*t + cy)*t;
+  return x => { let lo = 0, hi = 1, t = x; for (let i = 0; i < 24; i++) { t = (lo + hi) / 2; if (X(t) < x) lo = t; else hi = t; } return Y(t); };
+}
+const E = { soft: bezier(0.4, 0, 0.2, 1), calm: bezier(0.45, 0, 0.55, 1), out: bezier(0.2, 0, 0, 1), inout: bezier(0.65, 0, 0.35, 1) };
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (f, t, a, b) => { const u = clamp((t - a) / (b - a)); return u <= 0 ? 0 : u >= 1 ? 1 : f(u); };
+const lerp = (a, b, m) => a + (b - a) * m;
+const CN = '"DengXian","等线","Microsoft YaHei",sans-serif';
+const CN_L = '"DengXian Light","等线 Light","DengXian","等线",sans-serif';
+const EN_L = '"Segoe UI Light","Segoe UI",sans-serif';
+const INK = "#1d1d1f", INK2 = "#3a3a3c", GRAY = "#6e6e73", GRAY2 = "#8e8e93";
+
+const LOGO = new Image(); LOGO.src = "logo_k.png";
+const LOGO_W = new Image(); LOGO_W.src = "logo_w.png";
+// 历程时间轴节点旁的小照片（公司素材；低清的用 GPT 修复过，hd_ 不存在时退回 src_）
+const PHOTO = {};
+function loadPhoto(k, list) { const im = new Image(); PHOTO[k] = im; let i = 0; im.onerror = () => { if (++i < list.length) im.src = list[i]; }; im.src = list[0]; }
+loadPhoto("f2", ["photos/hd_factory2.png", "photos/src_factory2.png"]);
+loadPhoto("f1", ["photos/hd_factory1.png", "photos/src_factory1.png"]);
+loadPhoto("de", ["photos/hd_germany.png", "photos/src_germany.png"]);
+loadPhoto("cert", ["photos/cert.jpg"]);
+loadPhoto("prod", ["photos/product.png"]);
+const LOGO_L = new Image(); LOGO_L.src = "logo_line.png";
+const LOGO_AR = 1123 / 335;
+
+function text(str, x, y, size, font, color, align = "left", alpha = 1, track = 0) {
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.fillStyle = color; ctx.font = `${size}px ${font}`;
+  ctx.textAlign = align; ctx.textBaseline = "alphabetic";
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${track}px`;
+  ctx.fillText(str, x, y); ctx.restore();
+}
+function logo(cx, cy, h, alpha) { if (alpha <= 0) return; ctx.save(); ctx.globalAlpha = alpha; const w = h * LOGO_AR; ctx.drawImage(LOGO, cx - w / 2, cy - h / 2, w, h); ctx.restore(); }
+
+// ───────── 第一幕开场：logo 亮起 → 左移 + 竖线 → 定位 → 三类产品 ─────────
+function act1open(t) {
+  const a = seg(E.soft, t, 0.25, 1.25);
+  const mv = seg(E.inout, t, 1.35, 2.15);
+  const h = lerp(300, 250, mv);
+  const cx = lerp(W / 2, W * 0.30, mv), cy = H / 2;
+  ctx.save(); ctx.translate(0, (1 - a) * 18);
+  logo(cx, cy, h * lerp(0.97, 1, a), a);
+  ctx.restore();
+  // 竖线
+  const lq = seg(E.out, t, 1.75, 2.35);
+  if (lq > 0) { ctx.fillStyle = "#c7c7cc"; const lh = 380 * lq; ctx.fillRect(W * 0.535, cy - lh / 2, 2, lh); }
+  const X = W * 0.575;
+  const s = seg(E.soft, t, 1.95, 2.6);
+  text("护理床方案解决专家", X, cy - 70 + (1 - s) * 20, 92, CN, INK, "left", s, 6);
+  ["家庭护理床", "疗养院病床", "医院专用病床"].forEach((str, i) => {
+    const q = seg(E.soft, t, 2.6 + i * 0.36, 3.15 + i * 0.36);
+    text(str, X, cy + 40 + i * 70 + (1 - q) * 16, 50, CN, GRAY, "left", q, 4);
+  });
+}
+
+// ───────── S3 远景：大屏上方静止的 logo ─────────
+function logo_top(t) { logo(W / 2, H * 0.21, 150, 1); }
+
+// ───────── 第五幕：企业历程时间轴（横向流动） ─────────
+const NODES = [
+  ["1997", "成立", "Founded", "f2"],
+  ["2002", "东莞市政府指定供应商", "Designated supplier, Dongguan Government", "f1"],
+  ["2014", "品牌升级为连盈科技", "Rebranded as Lianying", "logo"],
+  ["2019", "启动中德合资护理床项目", "Sino-German care bed project", "de"],
+  ["2021", "取得护理床发明专利", "Invention patent for care beds", "cert"],
+  ["今天", "走向全球", "Going global", "prod"],
+];
+function timeline(t) {
+  const GAP = 640, LINE_Y = 620, FOCUS = 1350;
+  const p = E.calm(clamp(t / DUR));
+  const off = lerp(560, 1450 - 5 * GAP, p);
+  const L = W * 0.14;                                  // 左边留给台侧的张总
+  const intro = seg(E.soft, t, 0, 0.5);
+  // 底线 + 已走过的深色进度线
+  ctx.globalAlpha = intro;
+  ctx.fillStyle = "#d2d2d7"; ctx.fillRect(L, LINE_Y - 1, W - L, 2);
+  ctx.fillStyle = INK; ctx.fillRect(L, LINE_Y - 1.5, Math.max(0, Math.min(W, FOCUS) - L), 3);
+  NODES.forEach(([yr, cn, en, ph], i) => {
+    const x = off + i * GAP;
+    const edge = clamp((x - L - 40) / 220) * clamp((W - x + 60) / 260);
+    if (edge <= 0) return;
+    const near = clamp(1 - Math.abs(x - FOCUS) / (GAP * 0.9));
+    const passed = x <= FOCUS + 1;
+    const a = intro * edge * (0.55 + 0.45 * near);
+    ctx.globalAlpha = a;
+    // 节点
+    ctx.fillStyle = passed ? INK : "#ffffff"; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, LINE_Y, i === 5 ? 15 : 11, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (i === 5 && passed) { ctx.globalAlpha = a * 0.25; ctx.beginPath(); ctx.arc(x, LINE_Y, 30 + 6 * Math.sin(t * 4), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = a; }
+    // 小照片：年份上方，圆角，越靠近焦点越清楚
+    drawPhoto(ph, x, 215, 430, 280, a * (0.6 + 0.4 * near), 0.94 + 0.06 * near);
+    ctx.globalAlpha = a;
+    const isCN = i === 5;
+    text(yr, x, LINE_Y - 70, isCN ? 150 : 180, isCN ? CN : EN_L, INK, "center", 1, isCN ? 8 : -2);
+    text(cn, x, LINE_Y + 110, 50, CN, INK2, "center", 1, 3);
+    text(en, x, LINE_Y + 162, 28, EN_L, GRAY2, "center", 1, 0.5);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawPhoto(k, cx, cy, bw, bh, alpha, sc) {
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(cx, cy); ctx.scale(sc, sc);
+  if (k === "logo") { logo(0, 0, 150, alpha); ctx.restore(); return; }
+  const im = PHOTO[k]; if (!im || !im.complete || !im.naturalWidth) { ctx.restore(); return; }
+  const contain = k === "cert" || k === "prod";
+  let w = bw, h = bh;
+  const ar = im.naturalWidth / im.naturalHeight;
+  if (contain) { if (ar > bw / bh) h = bw / ar; else w = bh * ar; ctx.drawImage(im, -w / 2, -h / 2, w, h); }
+  else {
+    // cover：居中裁成 bw x bh
+    let sw = im.naturalWidth, sh = im.naturalHeight, sx = 0, sy = 0;
+    if (ar > bw / bh) { sw = sh * bw / bh; sx = (im.naturalWidth - sw) / 2; } else { sh = sw * bh / bw; sy = (im.naturalHeight - sh) / 2; }
+    ctx.beginPath(); const r = 16, x = -w / 2, y = -h / 2;
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.clip();
+    ctx.drawImage(im, sx, sy, sw, sh, x, y, w, h);
+  }
+  ctx.restore();
+}
+
+// ───────── 结尾：logo 淡入 → slogan 逐字 → 英文 → 公司小字 ─────────
+function ending(t) {
+  const a = seg(E.soft, t, 0.0, 1.0);
+  logo(W / 2, H * 0.30, 230, a);
+  const sl = "让天下起居不便人士更独立";
+  ctx.font = `100px ${CN}`; if ("letterSpacing" in ctx) ctx.letterSpacing = "10px";
+  const full = ctx.measureText(sl).width; let x = W / 2 - full / 2;
+  [...sl].forEach((ch, i) => {
+    const q = seg(E.soft, t, SL + i * 0.085, SL + 0.4 + i * 0.085);
+    text(ch, x, H * 0.64 + (1 - q) * 12, 100, CN, INK, "left", q, 10);
+    ctx.font = `100px ${CN}`; if ("letterSpacing" in ctx) ctx.letterSpacing = "10px";
+    x += ctx.measureText(ch).width;
+  });
+  const e = seg(E.soft, t, SL + 1.25, SL + 1.85);
+  text("Independence, for everyone who needs it.", W / 2, H * 0.73 + (1 - e) * 10, 48, EN_L, GRAY, "center", e, 1);
+  const c = seg(E.soft, t, SL + 1.85, SL + 2.45);
+  text("广东连盈科技有限公司  ·  www.zglyhlc.com", W / 2, H * 0.88, 32, CN, GRAY2, "center", c, 3);
+}
+
+// ───────── 结尾 v3：白屏 → 暗下 → 一道光扫过、logo 描边显现 → 填实 + 背后溢光 → logo 上移 → slogan 逐字（由虚到实） ─────────
+// 时间相对倒放镜头开头；#finale:时长:slogan开始秒
+const FZ = { white: 0.45, dark: 1.15, lg0: 1.3, lg1: 2.1, br0: 2.6, br1: 3.8, up0: 3.55, up1: 4.25 };
+const SL3 = P2 ? parseFloat(P2) : 4.3;
+const CN_LINE = "一张床，可以只是一张床。也可以是一个人，重新走向生活的起点。";
+const EN_LINE = "A bed can be just a bed. Or it can be where someone begins their way back to life.";
+function finale(t) {
+  // v6：大屏全程保持白色（不再变黑）；地球之后直接白屏，logo 在白屏上柔和浮现，再上移
+  const mv = seg(E.inout, t, FZ.up0, FZ.up1);
+  const lh = lerp(300, 230, mv), lcy = lerp(H * 0.43, H * 0.30, mv);
+  const la = seg(E.soft, t, FZ.lg0, FZ.lg1);
+  if (la > 0) logo(W / 2, lcy, lh, la);
+  // 3) 文字：由虚到实 + 轻微上浮
+  ctx.font = `66px ${CN}`; if ("letterSpacing" in ctx) ctx.letterSpacing = "5px";
+  const full = ctx.measureText(CN_LINE).width; let x = W / 2 - full / 2;
+  [...CN_LINE].forEach((ch, i) => {
+    const q = seg(E.soft, t, SL3 + i * 0.055, SL3 + 0.55 + i * 0.055);
+    ctx.font = `66px ${CN}`; if ("letterSpacing" in ctx) ctx.letterSpacing = "5px";
+    const cw = ctx.measureText(ch).width;
+    if (q > 0) { ctx.save(); if (q < 1) ctx.filter = `blur(${(1 - q) * 10}px)`; text(ch, x, H * 0.64 + (1 - q) * 10, 66, CN, INK2, "left", q, 5); ctx.restore(); }
+    x += cw;
+  });
+  const soft = (q, fn) => { if (q <= 0) return; ctx.save(); if (q < 1) ctx.filter = `blur(${(1 - q) * 10}px)`; fn(q); ctx.restore(); };
+  soft(seg(E.soft, t, SL3 + 2.1, SL3 + 2.7), q => text(EN_LINE, W / 2, H * 0.72 + (1 - q) * 10, 40, EN_L, GRAY, "center", q, 1));
+  soft(seg(E.soft, t, SL3 + 2.8, SL3 + 3.35), q => text("广东连盈科技有限公司  ·  www.zglyhlc.com", W / 2, H * 0.88 + (1 - q) * 10, 32, CN, "#8e8e93", "center", q, 3));
+}
+
+const PROGS = { act1open, logo_top, timeline, ending, finale };
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+  (PROGS[PROG] || act1open)(t);
+}
+
+window.__ready = false;
+let T = 0, playing = true, last = null;
+const $ = id => document.getElementById(id);
+$("scrub").max = DUR;
+function show() { render(T); $("scrub").value = T; $("time").textContent = `${PROG} ${T.toFixed(2)} / ${DUR}s`; }
+function tick(now) { if (playing) { if (last != null) T += (now - last) / 1000; if (T > DUR + 0.8) T = 0; show(); } last = now; requestAnimationFrame(tick); }
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "暂停" : "播放"; };
+$("scrub").oninput = () => { T = parseFloat($("scrub").value); playing = false; show(); };
+window.__render = tt => { T = tt; playing = false; show(); };
+Promise.all([...Object.values(PHOTO).map(im => im.decode().catch(() => 0)), LOGO.decode(), LOGO_W.decode(), LOGO_L.decode(), document.fonts.load(`50px ${CN}`), document.fonts.load(`50px ${EN_L}`)]).then(() => { show(); window.__ready = true; requestAnimationFrame(tick); });
+</script>
+</body>
+</html>
