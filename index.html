@@ -6,9 +6,12 @@
 <title>连盈秋季发布会 · 制作手记</title>
 <meta name="description" content="一部由创始人第一人称讲述、人与 AI 共同导演的 2 分 46 秒企业发布会影片，以及它背后的完整工作流。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23E3E77E'/%3E%3Cpath d='M9 22V10h3v9h7v3z' fill='%231E2A21'/%3E%3C/svg%3E">
+<script>
+if(!matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('tw');setTimeout(function(){if(!window.TW_OK)document.documentElement.classList.remove('tw')},2500)}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;112,800;125,900&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;112,800;125,900&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 :root{
   --lime:#E3E77E; --lime-2:#D8DC6E; --ink:#1E2A21; --ink-2:#3E4B40; --paper:#F7F6EE;
@@ -43,9 +46,8 @@ img{display:block;max-width:100%}
 .meta{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;font-size:14px;color:var(--ink-2)}
 .meta b{font-family:var(--display);font-weight:800;color:var(--ink);font-size:20px;letter-spacing:-.01em;margin-right:10px}
 .meta .right{text-align:right;max-width:280px;line-height:1.55}
-h1{font-weight:900;font-size:clamp(54px,11.2vw,156px);line-height:1.04;letter-spacing:-.035em;margin:30px 0 18px;margin-left:-.04em}
-h1 span{display:block}
-.lede{font-size:clamp(17px,1.6vw,20px);max-width:620px;color:var(--ink-2)}
+h1{font-weight:900;font-size:clamp(34px,8.6vw,118px);line-height:1.08;letter-spacing:-.035em;margin:30px 0 0;margin-left:-.04em}
+h1>span{display:block;white-space:nowrap}
 @media (max-width:640px){.meta{flex-direction:column}.meta .right{text-align:left}}
 
 /* 时间轴（首屏主角） */
@@ -174,8 +176,15 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
 .close{background:var(--ink);color:var(--lime)}
 .close .wrap{padding-top:96px;padding-bottom:72px}
 .close p.big{font-weight:900;font-size:clamp(34px,5.6vw,80px);line-height:1.15;letter-spacing:-.03em;max-width:1100px}
-.close .sub{margin-top:28px;max-width:640px;color:#C9CD74;font-size:17px}
 .close footer{margin-top:80px;padding-top:20px;border-top:1px solid rgba(227,231,126,.3);display:flex;justify-content:space-between;gap:16px;font-size:13px;color:#B9BD6A;flex-wrap:wrap}
+/* 逐字出现 */
+.tw :is(h1,h2,h3,p,blockquote,dt,dd,li,.meta>div,.who,.role,.tone,.num,.axis span,footer span):not(.tw-done):not(.ch){opacity:0}
+.ch{opacity:0;filter:blur(6px);transition:opacity .55s ease,filter .55s ease;transition-delay:var(--d)}
+.in .ch{opacity:1;filter:blur(0)}
+.sch{fill-opacity:0;transition:fill-opacity .45s ease;transition-delay:var(--d)}
+.in .sch{fill-opacity:1}
+.ci{animation:chin .45s ease both}
+@keyframes chin{from{opacity:0;filter:blur(5px)}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
 </head>
@@ -196,8 +205,7 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
     <div><b>连盈科技秋季发布会</b>No. 01 · 制作手记</div>
     <div class="right">一部 2 分 46 秒的企业发布会影片，由人和 AI 共同导演完成</div>
   </div>
-  <h1><span>发布会，</span><span>不只属于</span><span>科技公司。</span></h1>
-  <p class="lede">传统制造企业的创始人，也可以站上舞台，用第一人称讲自己的故事。拖动下面的时间轴，看这部片子的每一秒。</p>
+  <h1><span>发布会，</span><span>不只属于科技公司。</span></h1>
 
   <div class="scrub" aria-label="成片时间轴">
     <div class="frame">
@@ -303,7 +311,7 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
     <div class="step"><span class="num">2</span><div><h3>素材资产收集与管理</h3><div class="role">人拍摄提供 · AI 整理入库</div><p>公司、行业、产品、员工、老板、声音六类素材，一个总文件夹按幕分好，生成物按编号命名。另建一份禁用清单，交付前逐帧扫描。</p></div></div>
     <div class="step"><span class="num">3</span><div><h3>声音克隆与配音</h3><div class="role">AI</div><p>每人十几秒干净录音就能克隆。文稿逐句生成，每句一个文件，自带精确时长，剪辑和字幕都按它对齐；情绪和语速可调，讲话镜头放慢到约 0.85 倍。</p></div></div>
     <div class="step"><span class="num">4</span><div><h3>用 AI 补齐画面</h3><div class="role">AI 生图打包 · 人在平台生成视频</div><p>缺的画面靠生图和图生视频补。人文故事先出角色定妆照，后面每个镜头都参考它；每个镜头一个文件夹，放首帧图和提示词，人逐个生成，稳定可控。</p><ul><li>产品不让 AI 画，用真实素材</li><li>真人露脸用真实视频，逐帧换白底</li></ul></div></div>
-    <div class="step"><span class="num">5</span><div><h3>代码做动效</h3><div class="role">AI 写代码出画面</div><p>拍不到也生成不好的，让模型用代码写：零件合拢、专利墙、文字地球、企业历程、开灯揭幕。精确、可反复调，改一个参数就能重出。</p></div></div>
+    <div class="step"><span class="num">5</span><div><h3>代码做动效</h3><div class="role">AI 写代码出画面</div><p>拍不到也生成不好的，让模型用代码写：零件合拢、专利墙、文字地球、企业历程、开灯揭幕。连电影滤镜、调色、字幕和响度统一，也都是代码写的。精确、可反复调，改一个参数就能重出。</p></div></div>
     <div class="step"><span class="num">6</span><div><h3>分幕并行制作</h3><div class="role">多个 AI 助手 · 主导演统筹</div><p>每一幕独立脚本、一条命令重出，交付视频、台词时间表和说明。多个助手分头做，主导演派活、验收；内存和额度要统筹，大改前保留旧版本。</p></div></div>
     <div class="step"><span class="num">7</span><div><h3>总合成与迭代</h3><div class="role">AI 合成 · 人看片反馈</div><p>五幕拼接，加统一电影滤镜、中英字幕、统一响度和音乐。人看完给截图加时间点，AI 定位到对应镜头去改，一版一版往上提。</p></div></div>
   </div>
@@ -347,7 +355,7 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
       <h3>踩过的坑</h3>
       <dl>
         <dt>手机拍的视频整片发白</dt><dd>iPhone 默认是 HDR 格式，电脑上直接处理会发白，入库前统一转成正常颜色。</dd>
-        <dt>别家品牌混进画面</dt><dd>展厅视频的枕套上印着别家金字，宣传册里有别家的床，写进禁用清单，交付前逐帧扫描。</dd>
+        <dt>几路画面颜色接不上</dt><dd>实拍、AI 生成、代码动效各是一种色调，剪在一起很跳。最后用代码给全片统一加一层电影滤镜，字幕也按画面亮度自动变色。</dd>
         <dt>AI 生成的真人会变形</dt><dd>真人露脸改用真实视频逐帧换白底，不用图生视频。</dd>
         <dt>AI 味来自太亮太干净</dt><dd>拿真实素材当参考，要求纪实质感，或者用克制的灰银色调。</dd>
       </dl>
@@ -377,8 +385,7 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
 
 <section class="close">
   <div class="wrap">
-    <p class="big">人定故事和审美，<br>模型把它<span class="nowrap">写出来、</span><span class="nowrap">做出来、</span><span class="nowrap">剪出来。</span></p>
-    <p class="sub">传统企业不需要专业影视团队，也能讲出一个有发布会质感的故事。模型是伙伴，也是导演助理。</p>
+    <p class="big"><span class="nowrap">人定故事和审美，</span><br><span class="nowrap">模型把它做出来。</span></p>
     <footer><span>连盈科技秋季发布会 · 制作手记</span><span class="num">2026.10</span></footer>
   </div>
 </section>
@@ -407,6 +414,21 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
   var cache = {};
   function pad(n){ return (n < 10 ? '0' : '') + n; }
   function fmt(t){ t = Math.floor(t); return pad(Math.floor(t / 60)) + ':' + pad(t % 60); }
+  var TWON = document.documentElement.classList.contains('tw');
+  function typeIn(node, text, cls){
+    if (node.getAttribute('data-t') === text) return;
+    node.setAttribute('data-t', text);
+    if (cls !== undefined) node.className = cls;
+    if (!TWON) { node.textContent = text; return; }
+    var h = '', i = 0;
+    for (var k = 0; k < text.length; k++) {
+      var c = text[k];
+      if (c === ' ') { h += ' '; continue; }
+      c = c.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+      h += '<span class="ci" style="animation-delay:' + Math.min(i * 28, 900) + 'ms">' + c + '</span>'; i++;
+    }
+    node.innerHTML = h;
+  }
   function show(t){
     var idx = Math.min(83, Math.max(1, Math.round(t / 2) + 1));
     var src = 'assets/frames/f' + ('00' + idx).slice(-3) + '.jpg';
@@ -415,11 +437,11 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
     $('tc').textContent = fmt(t);
     $('tcv').textContent = fmt(t) + ' / ' + fmt(Math.ceil(TOTAL));
     var ai = 0; ACTS.forEach(function(a, i){ if (t >= a.s) ai = i; });
-    $('act').textContent = ACTS[ai].name; $('who').textContent = ACTS[ai].who;
+    typeIn($('act'), ACTS[ai].name); typeIn($('who'), ACTS[ai].who);
     [].forEach.call(mini.children, function(el, i){ el.className = i === ai ? 'on' : ''; });
     var L = null; lines.forEach(function(l){ if (t >= l.t - 0.2 && t <= l.e + 0.6) L = l; });
-    if (L) { $('zh').textContent = L.zh; $('zh').className = 'zh'; $('en').textContent = L.en; }
-    else { $('zh').textContent = '（此处没有台词，只有画面）'; $('zh').className = 'zh idle'; $('en').textContent = ''; }
+    if (L) { typeIn($('zh'), L.zh, 'zh'); typeIn($('en'), L.en); }
+    else { typeIn($('zh'), '（此处没有台词，只有画面）', 'zh idle'); typeIn($('en'), ''); }
   }
   var r = $('t');
   r.addEventListener('input', function(){ stop(); show(+r.value); });
@@ -486,6 +508,63 @@ h2{font-weight:900;font-size:clamp(36px,5.4vw,72px);line-height:1.12;letter-spac
   var back = document.createElement('li');
   back.innerHTML = '<span>反馈回到第 10 步，反复迭代，这次从 v1 改到 v7</span><span class="who">循环</span>';
   fl.appendChild(back);
+})();
+</script>
+<script>
+// 全站逐字出现：进入视口时一个字一个字浮现
+(function(){
+  var root = document.documentElement;
+  if (!root.classList.contains('tw')) return;
+  var SEL = 'h1,h2,h3,p,blockquote,dt,dd,li,.meta>div,.who,.role,.tone,.num,.axis span,footer span';
+  var all = [].slice.call(document.querySelectorAll(SEL));
+  var skip = function(el){ return el.closest('.ctl,.frame,.bars,svg'); };
+  var targets = all.filter(function(el){
+    if (skip(el)) return false;
+    for (var p = el.parentElement; p; p = p.parentElement) if (p.matches && p.matches(SEL) && !skip(p)) return false;
+    return true;
+  });
+  function split(el){
+    var nodes = [], w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    while (w.nextNode()) if (w.currentNode.nodeValue.trim()) nodes.push(w.currentNode);
+    var spans = [];
+    nodes.forEach(function(tn){
+      var f = document.createDocumentFragment(), txt = tn.nodeValue.replace(/\s+/g, ' ');
+      for (var i = 0; i < txt.length; i++) {
+        var c = txt[i];
+        if (c === ' ') { f.appendChild(document.createTextNode(' ')); continue; }
+        var s = document.createElement('span'); s.className = 'ch'; s.textContent = c; f.appendChild(s); spans.push(s);
+      }
+      tn.parentNode.replaceChild(f, tn);
+    });
+    return spans;
+  }
+  targets.forEach(function(el){
+    var spans = split(el), n = spans.length;
+    var big = /^(H1|H2|BLOCKQUOTE)$/.test(el.tagName) || el.classList.contains('big');
+    var step = big ? 55 : Math.max(6, Math.min(26, 700 / Math.max(n, 1)));
+    el._tw = function(base){ spans.forEach(function(s, i){ s.style.setProperty('--d', Math.round(base + i * step) + 'ms'); }); };
+  });
+  all.forEach(function(el){ el.classList.add('tw-done'); });
+  // 流程图里的字
+  var svg = document.querySelector('.flow-svg');
+  if (svg) {
+    [].forEach.call(svg.querySelectorAll('text'), function(t, k){
+      var txt = t.textContent; t.textContent = '';
+      for (var i = 0; i < txt.length; i++) {
+        var ts = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+        ts.setAttribute('class', 'sch'); ts.style.setProperty('--d', (Math.floor(k / 2) * 110 + i * 40) + 'ms');
+        ts.textContent = txt[i]; t.appendChild(ts);
+      }
+    });
+    targets.push(svg); svg._tw = function(){};
+  }
+  window.TW_OK = true;
+  var io = new IntersectionObserver(function(es){
+    var vis = es.filter(function(e){ return e.isIntersecting; }).map(function(e){ return e.target; });
+    vis.sort(function(a, b){ return a.compareDocumentPosition(b) & 4 ? -1 : 1; });
+    vis.forEach(function(el, i){ el._tw(Math.min(i * 90, 540)); el.classList.add('in'); io.unobserve(el); });
+  }, {rootMargin: '0px 0px -40px 0px'});
+  targets.forEach(function(el){ io.observe(el); });
 })();
 </script>
 </body>
