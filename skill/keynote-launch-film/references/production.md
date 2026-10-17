@@ -5,9 +5,9 @@
 ## 配音
 
 ```
-python mmvoice.py clone 录音.m4a <voice_id> "试听文本"          # voice_id 如 xxZhang01，字母开头
+python mmvoice.py clone 录音.m4a <voice_id> "试听文本"          # voice_id 如 founderVoice01，字母开头
 python emotion_test.py                                           # 改里面的句子和参数组合，出几版给用户挑
-python mmvoice.py ttsfile <voice_id> voice\script\zhang.txt voice\v1\zhang [--speed 0.95] [--emotion happy]
+python mmvoice.py ttsfile <voice_id> voice\script\founder.txt voice\v1\founder [--speed 0.95] [--emotion happy]
 ```
 - 每行一句 → `01.mp3, 02.mp3 …` + `lines.json`（每句精确毫秒）。剪辑节奏和字幕都按它对齐。
 - 连盈定稿参数：创始人 speed 0.95（沉稳）；技术总监 speed 1.05 + happy + `voice_modify{intensity:30,pitch:10}`（「开心加强」）；设计师 speed 1.05 + happy。

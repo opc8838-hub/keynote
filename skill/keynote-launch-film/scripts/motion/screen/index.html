@@ -109,7 +109,7 @@ function timeline(t) {
   const GAP = 640, LINE_Y = 620, FOCUS = 1350;
   const p = E.calm(clamp(t / DUR));
   const off = lerp(560, 1450 - 5 * GAP, p);
-  const L = W * 0.14;                                  // 左边留给台侧的张总
+  const L = W * 0.14;                                  // 左边留给台侧的创始人
   const intro = seg(E.soft, t, 0, 0.5);
   // 底线 + 已走过的深色进度线
   ctx.globalAlpha = intro;

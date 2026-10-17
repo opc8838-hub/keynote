@@ -17,8 +17,8 @@ TM = ("zscale=tin=arib-std-b67:min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100,f
 
 CFG = {
     # desk: 桌面远边（靠人那条边）两点；zoom: 放大倍数；cx/top: 裁切框的人物中心 x、框顶 y（原图坐标）
-    'li': dict(desk=((440, 882), (1920, 957)), zoom=1.4, cx=930, place=0.62, top=240, xmax=1690),
-    'zr': dict(desk=((330, 836), (1920, 893)), zoom=1.4, cx=900, place=0.62, top=140, xmax=1740),
+    'designer': dict(desk=((440, 882), (1920, 957)), zoom=1.4, cx=930, place=0.62, top=240, xmax=1690),
+    'tech': dict(desk=((330, 836), (1920, 893)), zoom=1.4, cx=900, place=0.62, top=140, xmax=1740),
 }
 W, H = 1920, 1080
 BG = np.array([255, 255, 255], np.float32)

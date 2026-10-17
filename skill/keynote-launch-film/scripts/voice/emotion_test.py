@@ -9,8 +9,8 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'emotion_test')
 os.makedirs(OUT, exist_ok=True)
 
 LINES = {
-    '智睿': ('一张好的护理床，首先要经得起时间。所以每一张连盈，都从一块钢板开始。', ['lyZhiruiCTO02', 'lyZhiruiCTO01']),
-    '黎生': ('参数会被记住。但真正被记住的，是那一刻——他不用再说一句：“麻烦你了。”', ['lyLiDesigner02', 'lyLiDesigner01']),
+    '技术总监': ('一张好的护理床，首先要经得起时间。所以每一张连盈，都从一块钢板开始。', ['lythe Technical DirectorCTO02', 'lythe Technical DirectorCTO01']),
+    '设计师': ('参数会被记住。但真正被记住的，是那一刻——他不用再说一句：“麻烦你了。”', ['designerVoice02', 'designerVoice01']),
 }
 VARIANTS = {
     'A_现在': dict(speed=0.95),

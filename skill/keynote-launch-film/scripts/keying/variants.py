@@ -1,4 +1,4 @@
-"""黎生抠像多方案对比（单帧）。
+"""设计师抠像多方案对比（单帧）。
   python variants.py in.png outdir [models...]
 A 宽松色键 / B 净背景差值（clean plate）/ C、D AI 抠人 / E = B 的发丝 + AI 的实心身体
 """
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     src, od = sys.argv[1], sys.argv[2]
     models = sys.argv[3:]
     os.makedirs(od, exist_ok=True)
-    cfg = CFG['li']
+    cfg = CFG['designer']
     img = cv2.imdecode(np.fromfile(src, np.uint8), cv2.IMREAD_COLOR)
     f = img.astype(np.float32)
     plate = clean_plate(f)

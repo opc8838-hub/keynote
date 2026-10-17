@@ -1,7 +1,7 @@
 r"""最终合成：五幕拼接 + 中英字幕 + 混音 → 成片。
   python master.py [--music 音乐.wav] [--out 输出.mp4] [--check t1 t2 ...]
 依赖：sections\ACT1/3/4/5.mp4 + ACTn_lines.json（助手交付）、act2\第二幕_正式版_1080p.mp4（主线程）。
-第二幕自身不带张总配音：这里把 zhang 06（产品介绍）、07（交棒）放进去，07 之后接 S2 张总指大屏 → 大屏白光 → 第三幕。
+第二幕自身不带创始人配音：这里把 founder 06（产品介绍）、07（交棒）放进去，07 之后接 S2 创始人指大屏 → 大屏白光 → 第三幕。
 字幕：苹果式，中文在上、英文在下，按背景亮度自动选深灰/白，无描边无底框，0.15s 淡入淡出。
 """
 import json
@@ -27,7 +27,7 @@ ACT2_SRC = os.path.join(ROOT, 'act2', '第二幕_正式版_1080p.mp4')
 ACT2_VOICE = [(6, 5.30), (7, None)]          # (句号, 在第二幕里的开始秒)；7 号接在片尾标题上，自动算
 S2_CLIP = os.path.join(ROOT, 'clips', 'S2_new_1080.mp4')     # 用户新做的清晰版（已裁掉 MiniMax 水印）
 S2_QUAD = [[116, 107], [1893, 107], [1947, 902], [60, 904]]
-XF = 0.5                                                      # 第二幕片尾 → 张总交棒的淡入淡出
+XF = 0.5                                                      # 第二幕片尾 → 创始人交棒的淡入淡出
 
 
 def dur(p):
@@ -49,16 +49,16 @@ ENC = ['-vf', 'scale=out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
 
 
 def build_act2():
-    """第二幕 + 张总 06/07 配音 + S2 交棒镜头（大屏渐白），统一成 30fps，音轨只有配音。"""
+    """第二幕 + 创始人 06/07 配音 + S2 交棒镜头（大屏渐白），统一成 30fps，音轨只有配音。"""
     out = os.path.join(WORK, 'ACT2_full.mp4')
     sp = os.path.join(ROOT, 'spotlight', 'spotlight_intro.mp4')       # 开灯揭幕（灯照出床的轮廓 → 全屏亮 → 接发布片第一帧）
     shift = dur(sp) if os.path.exists(sp) else 0.0
     d2 = dur(ACT2_SRC) + shift
-    v6, v7 = [os.path.join(ROOT, 'voice', 'v3', 'zhang', '%02d.mp3' % n) for n in (6, 7)]
+    v6, v7 = [os.path.join(ROOT, 'voice', 'v3', 'founder', '%02d.mp3' % n) for n in (6, 7)]
     ACT2_VOICE[0] = (6, 5.30 + shift)
-    t7 = d2 - 0.9                                    # 07 在片尾标题最后不到 1 秒开口，然后淡到张总
+    t7 = d2 - 0.9                                    # 07 在片尾标题最后不到 1 秒开口，然后淡到创始人
     s2_len = max(2.5, t7 + dur(v7) + 0.5 - d2 + XF)
-    # S2：张总指向大屏，最后 0.6 秒大屏白光漫开到全白（接第三幕）
+    # S2：创始人指向大屏，最后 0.6 秒大屏白光漫开到全白（接第三幕）
     s2 = os.path.join(WORK, 'S2_handoff.mp4')
     s2raw = os.path.join(WORK, 'S2_screen.mp4')
     scr = os.path.join(WORK, 'scr_ly600')
@@ -68,9 +68,9 @@ def build_act2():
     import stagecomp as SC
     SC.stage_segment(dict(src=S2_CLIP, ss=0.0, dur=s2_len, out=s2raw, content=scr,
                           quad=S2_QUAD))
-    # 张总侧身出现约 1 秒，然后镜头往右推、放大到大屏（人物移出画面），最后渐白
+    # 创始人侧身出现约 1 秒，然后镜头往右推、放大到大屏（人物移出画面），最后渐白
     n = int(round(s2_len * FPS))
-    # 0–0.9s：从大屏特写（和上一镜头的 LY-600 标题对位）拉开露出张总；停 0.7s；再往右推回大屏
+    # 0–0.9s：从大屏特写（和上一镜头的 LY-600 标题对位）拉开露出创始人；停 0.7s；再往右推回大屏
     a1, a2 = 27, 48
     ez = f"(1-cos(PI*min(1,max(0,on-{a2})/{n - a2})))/2"               # 从停顿结束一路右推到渐白，连续不停
     eo = f"(1-cos(PI*min(1,on/{a1})))/2"
@@ -96,8 +96,8 @@ def build_act2():
          f'[2:a]adelay={int(t7 * 1000)}|{int(t7 * 1000)}[a2];'
          f'[a1][a2]amix=inputs=2:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,apad,atrim=0:{total}[a]',
          '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-ar', '48000', '-ac', '2', out])
-    lines = [{'who': 'zhang', 'n': 6, 'start': ACT2_VOICE[0][1], 'end': ACT2_VOICE[0][1] + dur(v6)},
-             {'who': 'zhang', 'n': 7, 'start': t7, 'end': t7 + dur(v7)}]
+    lines = [{'who': 'founder', 'n': 6, 'start': ACT2_VOICE[0][1], 'end': ACT2_VOICE[0][1] + dur(v6)},
+             {'who': 'founder', 'n': 7, 'start': t7, 'end': t7 + dur(v7)}]
     return out, lines
 
 
